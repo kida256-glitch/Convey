@@ -612,7 +612,9 @@ const ListingModal = ({
                     message.toLowerCase().includes('failed to fetch');
 
                 if (isNetworkFailure) {
-                    addListing(pendingCreatePayload);
+                    const fallbackEventListingId = await fetchCreatedListingIdFromTx(createHash);
+                    const fallbackOnChainId = fallbackEventListingId ?? await fetchOnChainListingCount();
+                    addListing({ ...pendingCreatePayload, onChainId: fallbackOnChainId });
                     onActionResult({
                         type: 'error',
                         message: 'On-chain listing created, but server was unreachable. Listing saved locally.',
