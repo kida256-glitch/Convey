@@ -7,6 +7,7 @@ import { useAccount, useChainId, useSwitchChain, useSendTransaction, useWaitForT
 import { parseEther } from 'viem';
 import { useAvaxPrice } from '../hooks/useAvaxPrice';
 import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME } from '../wagmi';
+import { fetchListings, decrementListingStock, subscribeToListings, isSupabaseConfigured } from '../lib/listingsApi';
 
 export const BuyerMarketplace = () => {
   const [selectedListing, setSelectedListing] = useState<any>(null);
@@ -47,26 +48,39 @@ export const BuyerMarketplace = () => {
   useEffect(() => {
     let cancelled = false;
 
-    const syncListings = async () => {
+    const sync = async () => {
       try {
-        const res = await fetch('/api/listings');
-        if (!res.ok) return;
-        const remote = await res.json();
-        if (!cancelled && Array.isArray(remote)) {
-          setListings(remote);
-        }
+        const remote = await fetchListings();
+        if (!cancelled) setListings(remote);
       } catch {
-        // Keep local state if API is unavailable.
+        // Keep local state if the data source is temporarily unavailable.
       } finally {
         if (!cancelled) setIsLoadingListings(false);
       }
     };
 
-    void syncListings();
-    const id = window.setInterval(syncListings, 5000);
+    // Initial load.
+    void sync();
+
+    let pollingId: number | null = null;
+
+    if (isSupabaseConfigured) {
+      // Real-time: Supabase pushes changes instantly — no polling needed.
+      const unsubscribe = subscribeToListings((listings) => {
+        if (!cancelled) setListings(listings);
+      });
+      return () => {
+        cancelled = true;
+        unsubscribe();
+      };
+    } else {
+      // Fallback: poll the local API every 5 seconds.
+      pollingId = window.setInterval(sync, 5000);
+    }
+
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      if (pollingId !== null) window.clearInterval(pollingId);
     };
   }, [setListings]);
 
@@ -103,14 +117,12 @@ export const BuyerMarketplace = () => {
 
     addPurchase({ ...purchase, txHash: payHash });
     decrementStock(purchase.listingId);
-    void fetch(`/api/listings/${purchase.listingId}/decrement`, { method: 'POST' })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const updated = await res.json();
+    void decrementListingStock(purchase.listingId)
+      .then((updated) => {
         upsertListing(updated);
       })
       .catch(() => {
-        // Local decrement already applied.
+        // Local decrement already applied — server will sync on next poll.
       });
     addNotification({
       id: `${payHash}-buynow-notif`,

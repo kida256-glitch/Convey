@@ -4,6 +4,7 @@ import { Plus, DollarSign, X, MessageSquare, Eye, Pencil, Bell, PackageCheck, Ch
 import { Listing, useAppStore } from '../store/useAppStore';
 import { NegotiationChat } from './NegotiationChat';
 import { useAccount } from 'wagmi';
+import { publishListing, editListing, deleteListing } from '../lib/listingsApi';
 
 type ListingFormData = {
     title: string;
@@ -261,11 +262,10 @@ export const SellerDashboard = () => {
                                     onClick={async () => {
                                         const idToRemove = confirmUnlistId!;
                                         setConfirmUnlistId(null);
-                                        // Remove from shared API so buyers stop seeing it immediately.
                                         try {
-                                            await fetch(`/api/listings/${idToRemove}`, { method: 'DELETE' });
+                                            await deleteListing(idToRemove);
                                         } catch {
-                                            // Continue with local removal even if API is unavailable.
+                                            // Continue with local removal even if the call fails.
                                         }
                                         removeListing(idToRemove);
                                         setToast({ type: 'success', message: 'Listing removed from marketplace.' });
@@ -450,22 +450,14 @@ const ListingModal = ({
         }
 
         if (isEdit && listing) {
-            // Push the update to the shared API so all buyers see the latest data.
+            // Push the update to the shared data source (Supabase or local API).
             setIsPublishing(true);
-            fetch(`/api/listings/${listing.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            })
-                .then(async (res) => {
-                    if (!res.ok) throw new Error('API update failed');
-                    return res.json();
-                })
+            editListing(listing.id, payload)
                 .then((updated) => {
-                    upsertListing(updated as Listing);
+                    upsertListing(updated);
                 })
                 .catch(() => {
-                    // Fallback to local update.
+                    // Fallback to local update so the seller still sees the change.
                     updateListing(listing.id, payload);
                 })
                 .finally(() => {
@@ -474,28 +466,21 @@ const ListingModal = ({
                     onClose();
                 });
         } else {
-            // Save to shared API so listings are visible across connected accounts.
+            // Publish to shared data source (Supabase or local API).
             setIsPublishing(true);
-            fetch('/api/listings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            })
-                .then(async (res) => {
-                    if (!res.ok) {
-                        throw new Error('Unable to publish listing to shared store');
-                    }
-                    return res.json();
-                })
+            publishListing(payload)
                 .then((created) => {
-                    upsertListing(created as Listing);
-                    onActionResult({ type: 'success', message: 'Listing published successfully.' });
+                    upsertListing(created);
+                    onActionResult({ type: 'success', message: 'Listing published — visible to all buyers instantly.' });
                     onClose();
                 })
                 .catch(() => {
-                    // Fallback keeps app usable if API is unavailable.
+                    // Last-resort fallback: save locally so the seller can still see their listing.
                     addListing(payload);
-                    onActionResult({ type: 'success', message: 'Listing published locally (API unavailable).' });
+                    onActionResult({
+                        type: 'error',
+                        message: 'Could not reach the shared database. Listing saved locally only — buyers on other devices won\'t see it until the connection is restored.',
+                    });
                     onClose();
                 })
                 .finally(() => {
