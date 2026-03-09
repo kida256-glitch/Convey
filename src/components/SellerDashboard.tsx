@@ -559,13 +559,16 @@ const ListingModal = ({
                 });
         } else {
             // Create on-chain first so the listing has a valid contract ID for escrow funding.
+            const firstImage = payload.images[0] ?? '';
+            const onChainImageURI = firstImage.startsWith('data:') ? '' : firstImage;
             setPendingCreatePayload(payload);
             setIsPublishing(true);
             setTxStatus('Waiting for wallet confirmation');
             createOnChainListing({
                 title: payload.title,
                 description: payload.description,
-                imageURI: payload.images[0] ?? '',
+                // Avoid massive base64 blobs in calldata; keep rich images in app storage.
+                imageURI: onChainImageURI,
                 priceAvax: payload.price,
                 stock: payload.stock,
             });
