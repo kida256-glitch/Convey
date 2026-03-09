@@ -1,10 +1,7 @@
-// AUTO-GENERATED -- do not edit by hand.
+// AUTO-GENERATED — do not edit by hand.
 // Re-run: cd blockchain && npm run deploy:fuji
 
-const configuredAddress = (import.meta.env.VITE_CONTRACT_ADDRESS ?? '').trim();
-export const CONVEY_ADDRESS = (
-  configuredAddress || '0x4F86E430D94064826c50C6352E686Ef340208cc6'
-) as `0x${string}`;
+export const CONVEY_ADDRESS = '0xf0458739500B5c9C85Ec59088d72ad862b1C8F5a' as const;
 
 export const CONVEY_ABI = [
   {
