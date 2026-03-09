@@ -91,6 +91,13 @@ Contracts live in `blockchain/` and include:
 - Hardhat test suite
 - Deploy scripts for Fuji and Avalanche mainnet
 
+Current deployed contract (from `blockchain/deployments.json`):
+- Network: `Avalanche Fuji`
+- Chain ID: `43113`
+- Address: `0x4F86E430D94064826c50C6352E686Ef340208cc6`
+- Explorer: `https://testnet.snowtrace.io/address/0x4F86E430D94064826c50C6352E686Ef340208cc6`
+- Deployment tx: `https://testnet.snowtrace.io/tx/0x9447113e02d75273a22184a2530b197ed84ae48c7ddd7e60aa4bf7c59d9d8cc5`
+
 Basic commands:
 
 ```bash
