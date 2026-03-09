@@ -113,8 +113,9 @@ export function useCreateListing() {
   const create = useCallback(
     (o: { title: string; description: string; imageURI: string; priceAvax: number; stock: number }) => {
       assertDeployed();
+      // Compatibility: createListing exists on both older and newer deployments.
       void activeChainWrite(writeContract, ensureActiveChain, {
-        address: CONVEY_ADDRESS, abi, functionName: 'listProduct',
+        address: CONVEY_ADDRESS, abi, functionName: 'createListing',
         args: [o.title, o.description, o.imageURI, parseEther(o.priceAvax.toString()), o.stock],
       });
     },
