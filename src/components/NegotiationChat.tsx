@@ -18,9 +18,30 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
   const { address } = useAccount();
   const { listings: onChainListings } = useAllOnChainListings();
   const negotiation = negotiations.find((n) => n.id === negotiationId);
+  const storeListing = storeListings.find((l) => l.id === negotiation?.listingId);
   // Look up listing from on-chain data first, fall back to store
   const allListings = onChainListings.length > 0 ? onChainListings : storeListings;
   const listing = allListings.find((l) => l.id === negotiation?.listingId || l.onChainId === negotiation?.onChainListingId);
+
+  const resolvedEscrowListingId = (() => {
+    if (!negotiation) return undefined;
+    if (negotiation.onChainListingId && negotiation.onChainListingId > 0) return negotiation.onChainListingId;
+
+    const listingOnChainId = listing?.onChainId;
+    if (listingOnChainId && listingOnChainId > 0) return listingOnChainId;
+
+    const storeOnChainId = storeListing?.onChainId;
+    if (storeOnChainId && storeOnChainId > 0) return storeOnChainId;
+
+    if (!storeListing || onChainListings.length === 0) return undefined;
+
+    // Legacy fix: match local listing to on-chain listing when old rows lack onChainId.
+    const matched = onChainListings.find((candidate) =>
+      candidate.seller?.toLowerCase() === storeListing.seller?.toLowerCase() &&
+      candidate.title === storeListing.title,
+    );
+    return matched?.id;
+  })();
 
   // On-chain hooks
   const {
@@ -166,6 +187,15 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [withdrawSuccess]);
 
+  useEffect(() => {
+    if (!negotiation || !resolvedEscrowListingId) return;
+    if (negotiation.onChainListingId === resolvedEscrowListingId) return;
+
+    updateNegotiation(negotiationId, { onChainListingId: resolvedEscrowListingId });
+    void updateNegotiationRemote(negotiationId, { onChainListingId: resolvedEscrowListingId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [negotiation?.id, negotiation?.onChainListingId, resolvedEscrowListingId]);
+
   if (!negotiation) return null;
 
   // Check if this negotiation already has a completed purchase
@@ -201,9 +231,9 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
     if (!negotiation || existingPurchase) return;
 
     if (CONVEY_ADDRESS) {
-      const escrowListingId = listing?.onChainId ?? negotiation.onChainListingId;
+      const escrowListingId = resolvedEscrowListingId;
       if (!escrowListingId || escrowListingId <= 0) {
-        setPurchaseError('Escrow is only available for listings created on-chain. This listing does not have a contract listing ID yet.');
+        setPurchaseError('This listing could not be linked to an on-chain listing ID. Open a listing created after the latest deploy or refresh listings and try again.');
         return;
       }
       setPurchaseError(null);
@@ -240,7 +270,7 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
   };
 
   const handleReleasePurchase = () => {
-    const escrowListingId = listing?.onChainId ?? negotiation?.onChainListingId;
+    const escrowListingId = resolvedEscrowListingId;
     if (!escrowListingId || !negotiation) return;
     if (!address || address.toLowerCase() !== negotiation.sellerAddress.toLowerCase()) {
       setReleaseStatus('Smart contract reverted the transaction. Check listing state and permissions.');
