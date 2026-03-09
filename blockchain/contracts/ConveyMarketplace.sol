@@ -59,6 +59,11 @@ contract ConveyMarketplace is ReentrancyGuard, Ownable {
         OfferStatus status;
     }
 
+    struct Escrow {
+        address payable buyer;
+        uint256 amountWei;
+    }
+
     // ─────────────────────────────────────────────
     //  State
     // ─────────────────────────────────────────────
@@ -67,6 +72,12 @@ contract ConveyMarketplace is ReentrancyGuard, Ownable {
 
     mapping(uint256 => Listing) public listings;
     mapping(uint256 => Offer) public offers;
+
+    /// @dev listingId -> escrow payment funded by buyer.
+    mapping(uint256 => Escrow) public escrows;
+
+    /// @dev seller address -> released escrow amount available for withdrawal.
+    mapping(address => uint256) public pendingWithdrawals;
 
     /// @dev listingId → list of offerIds
     mapping(uint256 => uint256[]) private _listingOffers;
@@ -111,6 +122,12 @@ contract ConveyMarketplace is ReentrancyGuard, Ownable {
         address indexed buyer,
         uint256 amountWei
     );
+    event EscrowDeposited(
+        uint256 indexed listingId,
+        address indexed buyer,
+        uint256 amountWei
+    );
+    event SellerWithdrawal(address indexed seller, uint256 amountWei);
 
     event FeeBpsUpdated(uint16 newBps);
     event FeesWithdrawn(address indexed owner, uint256 amount);
@@ -165,6 +182,99 @@ contract ConveyMarketplace is ReentrancyGuard, Ownable {
         uint256 _priceWei,
         uint32 _stock
     ) external returns (uint256 listingId) {
+        listingId = _createListing(
+            _title,
+            _description,
+            _imageURI,
+            _priceWei,
+            _stock
+        );
+    }
+
+    /// @notice Alias used by frontend flows that call listProduct.
+    function listProduct(
+        string calldata _title,
+        string calldata _description,
+        string calldata _imageURI,
+        uint256 _priceWei,
+        uint32 _stock
+    ) external returns (uint256 listingId) {
+        listingId = _createListing(
+            _title,
+            _description,
+            _imageURI,
+            _priceWei,
+            _stock
+        );
+    }
+
+    /// @notice Buyer deposits AVAX into escrow for a listing.
+    ///         Funds remain locked until seller calls releaseFunds.
+    function depositToEscrow(
+        uint256 _listingId
+    ) external payable nonReentrant listingExists(_listingId) {
+        Listing storage l = listings[_listingId];
+        Escrow storage e = escrows[_listingId];
+
+        require(l.status == ListingStatus.Active, "Listing not active");
+        require(l.stock > 0, "Out of stock");
+        require(msg.sender != l.seller, "Seller cannot deposit");
+        require(msg.value > 0, "Deposit must be > 0");
+        require(e.amountWei == 0, "Escrow already funded");
+
+        escrows[_listingId] = Escrow({
+            buyer: payable(msg.sender),
+            amountWei: msg.value
+        });
+
+        emit EscrowDeposited(_listingId, msg.sender, msg.value);
+    }
+
+    /// @notice Seller confirms completion and releases escrow.
+    ///         Funds move into seller's pending withdrawals.
+    function releaseFunds(
+        uint256 _listingId
+    ) external listingExists(_listingId) onlyListingSeller(_listingId) {
+        Listing storage l = listings[_listingId];
+        Escrow storage e = escrows[_listingId];
+
+        require(l.status == ListingStatus.Active, "Listing not active");
+        require(l.stock > 0, "Out of stock");
+        require(e.amountWei > 0, "Escrow not funded");
+
+        uint256 amount = e.amountWei;
+        address payable buyer = e.buyer;
+
+        // Checks-effects-interactions: clear escrow and account payout before transfer.
+        delete escrows[_listingId];
+        _finaliseStock(l);
+
+        uint256 fee = (amount * platformFeeBps) / 10_000;
+        uint256 payout = amount - fee;
+        pendingWithdrawals[l.seller] += payout;
+
+        emit FundsReleased(_listingId, l.seller, buyer, amount);
+    }
+
+    /// @notice Seller withdraws released escrow funds.
+    function withdraw() external nonReentrant {
+        uint256 amount = pendingWithdrawals[msg.sender];
+        require(amount > 0, "Nothing to withdraw");
+
+        pendingWithdrawals[msg.sender] = 0;
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "Withdrawal failed");
+
+        emit SellerWithdrawal(msg.sender, amount);
+    }
+
+    function _createListing(
+        string calldata _title,
+        string calldata _description,
+        string calldata _imageURI,
+        uint256 _priceWei,
+        uint32 _stock
+    ) internal returns (uint256 listingId) {
         require(bytes(_title).length > 0, "Title required");
         require(_priceWei > 0, "Price must be > 0");
         require(_stock > 0, "Stock must be > 0");
@@ -519,6 +629,6 @@ contract ConveyMarketplace is ReentrancyGuard, Ownable {
     //  Fallback — reject accidental ETH
     // ─────────────────────────────────────────────
     receive() external payable {
-        revert("Use buyDirect or makeOffer");
+        revert("Use buyDirect, makeOffer, or depositToEscrow");
     }
 }

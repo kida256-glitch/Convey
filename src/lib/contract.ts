@@ -1,4 +1,4 @@
-// AUTO-GENERATED — do not edit by hand.
+// AUTO-GENERATED -- do not edit by hand.
 // Re-run: cd blockchain && npm run deploy:fuji
 
 const configuredAddress = (import.meta.env.VITE_CONTRACT_ADDRESS ?? '').trim();
@@ -68,6 +68,31 @@ export const CONVEY_ABI = [
       }
     ],
     "name": "DirectPurchase",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "listingId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "buyer",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amountWei",
+        "type": "uint256"
+      }
+    ],
+    "name": "EscrowDeposited",
     "type": "event"
   },
   {
@@ -336,6 +361,25 @@ export const CONVEY_ABI = [
     "type": "event"
   },
   {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "seller",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amountWei",
+        "type": "uint256"
+      }
+    ],
+    "name": "SellerWithdrawal",
+    "type": "event"
+  },
+  {
     "inputs": [],
     "name": "MAX_FEE_BPS",
     "outputs": [
@@ -478,6 +522,43 @@ export const CONVEY_ABI = [
         "type": "uint256"
       }
     ],
+    "name": "depositToEscrow",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "escrows",
+    "outputs": [
+      {
+        "internalType": "address payable",
+        "name": "buyer",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amountWei",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_listingId",
+        "type": "uint256"
+      }
+    ],
     "name": "getListingOffers",
     "outputs": [
       {
@@ -531,6 +612,45 @@ export const CONVEY_ABI = [
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "_title",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "_description",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "_imageURI",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_priceWei",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint32",
+        "name": "_stock",
+        "type": "uint32"
+      }
+    ],
+    "name": "listProduct",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "listingId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -690,6 +810,25 @@ export const CONVEY_ABI = [
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "pendingWithdrawals",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "platformFeeBps",
     "outputs": [
@@ -711,6 +850,19 @@ export const CONVEY_ABI = [
       }
     ],
     "name": "rejectOffer",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_listingId",
+        "type": "uint256"
+      }
+    ],
+    "name": "releaseFunds",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -767,6 +919,13 @@ export const CONVEY_ABI = [
       }
     ],
     "name": "updateListing",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "withdraw",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

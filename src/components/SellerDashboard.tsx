@@ -6,7 +6,7 @@ import { NegotiationChat } from './NegotiationChat';
 import { useAccount } from 'wagmi';
 import { publishListing, editListing, deleteListing } from '../lib/listingsApi';
 import { markNotificationsReadRemote } from '../lib/negotiationsApi';
-import { useCreateListing } from '../lib/useConvey';
+import { parseConveyTxError, useCreateListing } from '../lib/useConvey';
 import { CONVEY_ADDRESS, CONVEY_ABI } from '../lib/contract';
 import { config, ACTIVE_CHAIN_ID } from '../wagmi';
 import { decodeEventLog } from 'viem';
@@ -445,8 +445,17 @@ const ListingModal = ({
     onActionResult: (toast: Toast) => void;
 }) => {
     const { addListing, updateListing, upsertListing } = useAppStore();
-    const { create: createOnChainListing, hash: createHash, isPending: createPending, isSuccess: createSuccess, error: createError } = useCreateListing();
+    const {
+        create: createOnChainListing,
+        hash: createHash,
+        isAwaitingWallet: createAwaitingWallet,
+        isTransactionPending: createTxPending,
+        isPending: createPending,
+        isSuccess: createSuccess,
+        error: createError,
+    } = useCreateListing();
     const [isPublishing, setIsPublishing] = useState(false);
+    const [txStatus, setTxStatus] = useState<string | null>(null);
     const [pendingCreatePayload, setPendingCreatePayload] = useState<Omit<Listing, 'id'> | null>(null);
     const [processedCreateHash, setProcessedCreateHash] = useState<string | null>(null);
     const [formData, setFormData] = useState<ListingFormData>(() => {
@@ -552,6 +561,7 @@ const ListingModal = ({
             // Create on-chain first so the listing has a valid contract ID for escrow funding.
             setPendingCreatePayload(payload);
             setIsPublishing(true);
+            setTxStatus('Waiting for wallet confirmation');
             createOnChainListing({
                 title: payload.title,
                 description: payload.description,
@@ -566,11 +576,26 @@ const ListingModal = ({
         if (!pendingCreatePayload || !createError) return;
         onActionResult({
             type: 'error',
-            message: (createError as Error).message || 'Failed to create listing on-chain.',
+            message: parseConveyTxError(createError),
         });
         setPendingCreatePayload(null);
         setIsPublishing(false);
+        setTxStatus(null);
     }, [pendingCreatePayload, createError, onActionResult]);
+
+    useEffect(() => {
+        if (createAwaitingWallet) {
+            setTxStatus('Waiting for wallet confirmation');
+            return;
+        }
+        if (createTxPending) {
+            setTxStatus('Transaction pending');
+            return;
+        }
+        if (createSuccess) {
+            setTxStatus('Transaction confirmed');
+        }
+    }, [createAwaitingWallet, createTxPending, createSuccess]);
 
     useEffect(() => {
         if (!pendingCreatePayload || !createSuccess || !createHash) return;
@@ -626,6 +651,7 @@ const ListingModal = ({
             } finally {
                 setPendingCreatePayload(null);
                 setIsPublishing(false);
+                setTxStatus(null);
             }
         };
 
@@ -794,6 +820,9 @@ const ListingModal = ({
                             <><Loader2 className="w-4 h-4 animate-spin" /> Publishing On-Chain…</>
                         ) : isEdit ? 'Save Changes' : 'Publish Listing'}
                     </button>
+                    {txStatus && !isEdit && (
+                        <p className="text-xs text-center text-gray-300">{txStatus}</p>
+                    )}
                 </form>
             </motion.div>
         </div>

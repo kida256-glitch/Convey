@@ -56,6 +56,20 @@ describe('ConveyMarketplace', () => {
         });
     });
 
+    describe('listProduct', () => {
+        it('creates a listing through listProduct alias', async () => {
+            await expect(
+                marketplace.connect(seller).listProduct('Alias Item', 'Desc', 'ipfs://alias', ONE_AVAX, 2)
+            )
+                .to.emit(marketplace, 'ListingCreated')
+                .withArgs(1, seller.address, ONE_AVAX, 2);
+
+            const l = await marketplace.listings(1);
+            expect(l.title).to.equal('Alias Item');
+            expect(l.stock).to.equal(2);
+        });
+    });
+
     describe('cancelListing', () => {
         beforeEach(async () => {
             await marketplace.connect(seller).createListing('Item', '', '', ONE_AVAX, 5);
@@ -177,6 +191,43 @@ describe('ConveyMarketplace', () => {
             // Buyer's net change: received refund of (0.5 - 0.25) = 0.25, minus gas
             const refund = HALF_AVAX - lowerCounter;
             expect(buyerAfter - buyerBefore + gasUsed).to.be.closeTo(refund, ethers.parseEther('0.001'));
+        });
+    });
+
+    // ─── Escrow flow (depositToEscrow / releaseFunds / withdraw) ─────────────
+    describe('escrow lifecycle', () => {
+        beforeEach(async () => {
+            await marketplace.connect(seller).createListing('Escrow Item', '', '', ONE_AVAX, 1);
+        });
+
+        it('buyer deposits to escrow and seller withdraws after release', async () => {
+            await expect(marketplace.connect(buyer).depositToEscrow(1, { value: HALF_AVAX }))
+                .to.emit(marketplace, 'EscrowDeposited')
+                .withArgs(1, buyer.address, HALF_AVAX);
+
+            const sellerBeforeRelease = await marketplace.pendingWithdrawals(seller.address);
+            expect(sellerBeforeRelease).to.equal(0);
+
+            await expect(marketplace.connect(seller).releaseFunds(1))
+                .to.emit(marketplace, 'FundsReleased')
+                .withArgs(1, seller.address, buyer.address, HALF_AVAX);
+
+            const sellerPending = await marketplace.pendingWithdrawals(seller.address);
+            expect(sellerPending).to.equal(HALF_AVAX);
+
+            const sellerBeforeWithdraw = await ethers.provider.getBalance(seller.address);
+            const tx = await marketplace.connect(seller).withdraw();
+            const receipt = await tx.wait();
+            const gasUsed = receipt!.gasUsed * tx.gasPrice;
+            const sellerAfterWithdraw = await ethers.provider.getBalance(seller.address);
+
+            expect(sellerAfterWithdraw - sellerBeforeWithdraw + gasUsed).to.equal(HALF_AVAX);
+            expect(await marketplace.pendingWithdrawals(seller.address)).to.equal(0);
+        });
+
+        it('prevents non-seller from releasing escrow', async () => {
+            await marketplace.connect(buyer).depositToEscrow(1, { value: HALF_AVAX });
+            await expect(marketplace.connect(buyer2).releaseFunds(1)).to.be.revertedWith('Not the seller');
         });
     });
 

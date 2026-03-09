@@ -34,26 +34,33 @@ export interface ConveyMarketplaceInterface extends Interface {
       | "cancelOffer"
       | "counterOffer"
       | "createListing"
+      | "depositToEscrow"
+      | "escrows"
       | "getListingOffers"
       | "getOfferDetails"
+      | "listProduct"
       | "listingCount"
       | "listings"
       | "makeOffer"
       | "offerCount"
       | "offers"
       | "owner"
+      | "pendingWithdrawals"
       | "platformFeeBps"
       | "rejectOffer"
+      | "releaseFunds"
       | "renounceOwnership"
       | "setPlatformFee"
       | "transferOwnership"
       | "updateListing"
+      | "withdraw"
       | "withdrawFees"
   ): FunctionFragment;
 
   getEvent(
     nameOrSignatureOrTopic:
       | "DirectPurchase"
+      | "EscrowDeposited"
       | "FeeBpsUpdated"
       | "FeesWithdrawn"
       | "FundsReleased"
@@ -67,6 +74,7 @@ export interface ConveyMarketplaceInterface extends Interface {
       | "OfferCreated"
       | "OfferRejected"
       | "OwnershipTransferred"
+      | "SellerWithdrawal"
   ): EventFragment;
 
   encodeFunctionData(
@@ -102,12 +110,24 @@ export interface ConveyMarketplaceInterface extends Interface {
     values: [string, string, string, BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(
+    functionFragment: "depositToEscrow",
+    values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "escrows",
+    values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
     functionFragment: "getListingOffers",
     values: [BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "getOfferDetails",
     values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "listProduct",
+    values: [string, string, string, BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "listingCount",
@@ -131,11 +151,19 @@ export interface ConveyMarketplaceInterface extends Interface {
   ): string;
   encodeFunctionData(functionFragment: "owner", values?: undefined): string;
   encodeFunctionData(
+    functionFragment: "pendingWithdrawals",
+    values: [AddressLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "platformFeeBps",
     values?: undefined
   ): string;
   encodeFunctionData(
     functionFragment: "rejectOffer",
+    values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "releaseFunds",
     values: [BigNumberish]
   ): string;
   encodeFunctionData(
@@ -154,6 +182,7 @@ export interface ConveyMarketplaceInterface extends Interface {
     functionFragment: "updateListing",
     values: [BigNumberish, BigNumberish, BigNumberish]
   ): string;
+  encodeFunctionData(functionFragment: "withdraw", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "withdrawFees",
     values?: undefined
@@ -189,11 +218,20 @@ export interface ConveyMarketplaceInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "depositToEscrow",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(functionFragment: "escrows", data: BytesLike): Result;
+  decodeFunctionResult(
     functionFragment: "getListingOffers",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "getOfferDetails",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "listProduct",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -206,11 +244,19 @@ export interface ConveyMarketplaceInterface extends Interface {
   decodeFunctionResult(functionFragment: "offers", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
   decodeFunctionResult(
+    functionFragment: "pendingWithdrawals",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "platformFeeBps",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "rejectOffer",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "releaseFunds",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -229,6 +275,7 @@ export interface ConveyMarketplaceInterface extends Interface {
     functionFragment: "updateListing",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "withdraw", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "withdrawFees",
     data: BytesLike
@@ -252,6 +299,28 @@ export namespace DirectPurchaseEvent {
     listingId: bigint;
     buyer: string;
     seller: string;
+    amountWei: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace EscrowDepositedEvent {
+  export type InputTuple = [
+    listingId: BigNumberish,
+    buyer: AddressLike,
+    amountWei: BigNumberish
+  ];
+  export type OutputTuple = [
+    listingId: bigint,
+    buyer: string,
+    amountWei: bigint
+  ];
+  export interface OutputObject {
+    listingId: bigint;
+    buyer: string;
     amountWei: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
@@ -476,6 +545,19 @@ export namespace OwnershipTransferredEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace SellerWithdrawalEvent {
+  export type InputTuple = [seller: AddressLike, amountWei: BigNumberish];
+  export type OutputTuple = [seller: string, amountWei: bigint];
+  export interface OutputObject {
+    seller: string;
+    amountWei: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export interface ConveyMarketplace extends BaseContract {
   connect(runner?: ContractRunner | null): ConveyMarketplace;
   waitForDeployment(): Promise<this>;
@@ -565,6 +647,18 @@ export interface ConveyMarketplace extends BaseContract {
     "nonpayable"
   >;
 
+  depositToEscrow: TypedContractMethod<
+    [_listingId: BigNumberish],
+    [void],
+    "payable"
+  >;
+
+  escrows: TypedContractMethod<
+    [arg0: BigNumberish],
+    [[string, bigint] & { buyer: string; amountWei: bigint }],
+    "view"
+  >;
+
   getListingOffers: TypedContractMethod<
     [_listingId: BigNumberish],
     [bigint[]],
@@ -584,6 +678,18 @@ export interface ConveyMarketplace extends BaseContract {
       }
     ],
     "view"
+  >;
+
+  listProduct: TypedContractMethod<
+    [
+      _title: string,
+      _description: string,
+      _imageURI: string,
+      _priceWei: BigNumberish,
+      _stock: BigNumberish
+    ],
+    [bigint],
+    "nonpayable"
   >;
 
   listingCount: TypedContractMethod<[], [bigint], "view">;
@@ -630,10 +736,22 @@ export interface ConveyMarketplace extends BaseContract {
 
   owner: TypedContractMethod<[], [string], "view">;
 
+  pendingWithdrawals: TypedContractMethod<
+    [arg0: AddressLike],
+    [bigint],
+    "view"
+  >;
+
   platformFeeBps: TypedContractMethod<[], [bigint], "view">;
 
   rejectOffer: TypedContractMethod<
     [_offerId: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+
+  releaseFunds: TypedContractMethod<
+    [_listingId: BigNumberish],
     [void],
     "nonpayable"
   >;
@@ -661,6 +779,8 @@ export interface ConveyMarketplace extends BaseContract {
     [void],
     "nonpayable"
   >;
+
+  withdraw: TypedContractMethod<[], [void], "nonpayable">;
 
   withdrawFees: TypedContractMethod<[], [void], "nonpayable">;
 
@@ -707,6 +827,16 @@ export interface ConveyMarketplace extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "depositToEscrow"
+  ): TypedContractMethod<[_listingId: BigNumberish], [void], "payable">;
+  getFunction(
+    nameOrSignature: "escrows"
+  ): TypedContractMethod<
+    [arg0: BigNumberish],
+    [[string, bigint] & { buyer: string; amountWei: bigint }],
+    "view"
+  >;
+  getFunction(
     nameOrSignature: "getListingOffers"
   ): TypedContractMethod<[_listingId: BigNumberish], [bigint[]], "view">;
   getFunction(
@@ -724,6 +854,19 @@ export interface ConveyMarketplace extends BaseContract {
       }
     ],
     "view"
+  >;
+  getFunction(
+    nameOrSignature: "listProduct"
+  ): TypedContractMethod<
+    [
+      _title: string,
+      _description: string,
+      _imageURI: string,
+      _priceWei: BigNumberish,
+      _stock: BigNumberish
+    ],
+    [bigint],
+    "nonpayable"
   >;
   getFunction(
     nameOrSignature: "listingCount"
@@ -772,11 +915,17 @@ export interface ConveyMarketplace extends BaseContract {
     nameOrSignature: "owner"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
+    nameOrSignature: "pendingWithdrawals"
+  ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
+  getFunction(
     nameOrSignature: "platformFeeBps"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "rejectOffer"
   ): TypedContractMethod<[_offerId: BigNumberish], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "releaseFunds"
+  ): TypedContractMethod<[_listingId: BigNumberish], [void], "nonpayable">;
   getFunction(
     nameOrSignature: "renounceOwnership"
   ): TypedContractMethod<[], [void], "nonpayable">;
@@ -798,6 +947,9 @@ export interface ConveyMarketplace extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "withdraw"
+  ): TypedContractMethod<[], [void], "nonpayable">;
+  getFunction(
     nameOrSignature: "withdrawFees"
   ): TypedContractMethod<[], [void], "nonpayable">;
 
@@ -807,6 +959,13 @@ export interface ConveyMarketplace extends BaseContract {
     DirectPurchaseEvent.InputTuple,
     DirectPurchaseEvent.OutputTuple,
     DirectPurchaseEvent.OutputObject
+  >;
+  getEvent(
+    key: "EscrowDeposited"
+  ): TypedContractEvent<
+    EscrowDepositedEvent.InputTuple,
+    EscrowDepositedEvent.OutputTuple,
+    EscrowDepositedEvent.OutputObject
   >;
   getEvent(
     key: "FeeBpsUpdated"
@@ -899,6 +1058,13 @@ export interface ConveyMarketplace extends BaseContract {
     OwnershipTransferredEvent.OutputTuple,
     OwnershipTransferredEvent.OutputObject
   >;
+  getEvent(
+    key: "SellerWithdrawal"
+  ): TypedContractEvent<
+    SellerWithdrawalEvent.InputTuple,
+    SellerWithdrawalEvent.OutputTuple,
+    SellerWithdrawalEvent.OutputObject
+  >;
 
   filters: {
     "DirectPurchase(uint256,address,address,uint256)": TypedContractEvent<
@@ -910,6 +1076,17 @@ export interface ConveyMarketplace extends BaseContract {
       DirectPurchaseEvent.InputTuple,
       DirectPurchaseEvent.OutputTuple,
       DirectPurchaseEvent.OutputObject
+    >;
+
+    "EscrowDeposited(uint256,address,uint256)": TypedContractEvent<
+      EscrowDepositedEvent.InputTuple,
+      EscrowDepositedEvent.OutputTuple,
+      EscrowDepositedEvent.OutputObject
+    >;
+    EscrowDeposited: TypedContractEvent<
+      EscrowDepositedEvent.InputTuple,
+      EscrowDepositedEvent.OutputTuple,
+      EscrowDepositedEvent.OutputObject
     >;
 
     "FeeBpsUpdated(uint16)": TypedContractEvent<
@@ -1053,6 +1230,17 @@ export interface ConveyMarketplace extends BaseContract {
       OwnershipTransferredEvent.InputTuple,
       OwnershipTransferredEvent.OutputTuple,
       OwnershipTransferredEvent.OutputObject
+    >;
+
+    "SellerWithdrawal(address,uint256)": TypedContractEvent<
+      SellerWithdrawalEvent.InputTuple,
+      SellerWithdrawalEvent.OutputTuple,
+      SellerWithdrawalEvent.OutputObject
+    >;
+    SellerWithdrawal: TypedContractEvent<
+      SellerWithdrawalEvent.InputTuple,
+      SellerWithdrawalEvent.OutputTuple,
+      SellerWithdrawalEvent.OutputObject
     >;
   };
 }

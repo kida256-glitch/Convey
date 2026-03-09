@@ -2,7 +2,7 @@
  * useConvey — wagmi hooks for ConveyMarketplace on the configured Avalanche chain.
  * All write hooks use `as any` on the abi to avoid wagmi v2 deep type instantiation errors.
  */
-import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain } from 'wagmi';
 import { parseEther, formatEther } from 'viem';
 import { readContract } from '@wagmi/core';
@@ -57,9 +57,37 @@ function useConveyWrite() {
     }
   }, [switchChainAsync]);
 
-  // Combine wallet-rejection error and on-chain revert error into one field
+  // Combine wallet-rejection error and on-chain revert error into one field.
   const error = writeError ?? receiptError ?? null;
-  return { writeContract, ensureActiveChain, hash, isPending: isPending || isConfirming, isSuccess, error };
+  return {
+    writeContract,
+    ensureActiveChain,
+    hash,
+    isAwaitingWallet: isPending && !hash,
+    isTransactionPending: !!hash && isConfirming,
+    isPending: isPending || isConfirming,
+    isSuccess,
+    error,
+  };
+}
+
+export function parseConveyTxError(error: unknown): string {
+  const raw = `${(error as any)?.shortMessage ?? (error as Error)?.message ?? error ?? ''}`.toLowerCase();
+
+  if (raw.includes('user rejected') || raw.includes('user denied') || raw.includes('rejected the request')) {
+    return 'User rejected the wallet transaction.';
+  }
+  if (raw.includes('insufficient funds')) {
+    return 'Insufficient funds to cover value and gas.';
+  }
+  if (raw.includes('execution reverted') || raw.includes('revert')) {
+    return 'Smart contract reverted the transaction. Check listing state and permissions.';
+  }
+  if (raw.includes('network error') || raw.includes('failed to fetch') || raw.includes('timeout') || raw.includes('rpc')) {
+    return 'Network RPC failure while sending the transaction. Please retry.';
+  }
+
+  return (error as Error)?.message || 'Transaction failed.';
 }
 
 /** Wraps a writeContract payload to always target the configured chain */
@@ -72,18 +100,27 @@ async function activeChainWrite(writeContract: any, ensureActiveChain: () => Pro
 // ─── Seller ────────────────────────────────────────────────────────────────────
 
 export function useCreateListing() {
-  const { writeContract, ensureActiveChain, hash, isPending, isSuccess, error } = useConveyWrite();
+  const {
+    writeContract,
+    ensureActiveChain,
+    hash,
+    isAwaitingWallet,
+    isTransactionPending,
+    isPending,
+    isSuccess,
+    error,
+  } = useConveyWrite();
   const create = useCallback(
     (o: { title: string; description: string; imageURI: string; priceAvax: number; stock: number }) => {
       assertDeployed();
       void activeChainWrite(writeContract, ensureActiveChain, {
-        address: CONVEY_ADDRESS, abi, functionName: 'createListing',
+        address: CONVEY_ADDRESS, abi, functionName: 'listProduct',
         args: [o.title, o.description, o.imageURI, parseEther(o.priceAvax.toString()), o.stock],
       });
     },
     [writeContract, ensureActiveChain],
   );
-  return { create, hash, isPending, isSuccess, error };
+  return { create, hash, isAwaitingWallet, isTransactionPending, isPending, isSuccess, error };
 }
 
 export function useCancelListing() {
@@ -116,18 +153,27 @@ export function useBuyDirect() {
 }
 
 export function useMakeOffer() {
-  const { writeContract, ensureActiveChain, hash, isPending, isSuccess, error } = useConveyWrite();
+  const {
+    writeContract,
+    ensureActiveChain,
+    hash,
+    isAwaitingWallet,
+    isTransactionPending,
+    isPending,
+    isSuccess,
+    error,
+  } = useConveyWrite();
   const offer = useCallback(
-    (listingId: number, offerAvax: number) => {
+    (listingId: number, offerAvax: number | string) => {
       assertDeployed();
       void activeChainWrite(writeContract, ensureActiveChain, {
-        address: CONVEY_ADDRESS, abi, functionName: 'makeOffer',
+        address: CONVEY_ADDRESS, abi, functionName: 'depositToEscrow',
         args: [BigInt(listingId)], value: parseEther(offerAvax.toString()),
       });
     },
     [writeContract, ensureActiveChain],
   );
-  return { offer, hash, isPending, isSuccess, error };
+  return { offer, hash, isAwaitingWallet, isTransactionPending, isPending, isSuccess, error };
 }
 
 export function useCounterOffer() {
@@ -146,15 +192,47 @@ export function useCounterOffer() {
 }
 
 export function useAcceptOffer() {
-  const { writeContract, ensureActiveChain, hash, isPending, isSuccess, error } = useConveyWrite();
+  const {
+    writeContract,
+    ensureActiveChain,
+    hash,
+    isAwaitingWallet,
+    isTransactionPending,
+    isPending,
+    isSuccess,
+    error,
+  } = useConveyWrite();
   const accept = useCallback(
-    (offerId: number) => {
+    (listingId: number) => {
       assertDeployed();
-      void activeChainWrite(writeContract, ensureActiveChain, { address: CONVEY_ADDRESS, abi, functionName: 'acceptOffer', args: [BigInt(offerId)] });
+      void activeChainWrite(writeContract, ensureActiveChain, { address: CONVEY_ADDRESS, abi, functionName: 'releaseFunds', args: [BigInt(listingId)] });
     },
     [writeContract, ensureActiveChain],
   );
-  return { accept, hash, isPending, isSuccess, error };
+  return { accept, hash, isAwaitingWallet, isTransactionPending, isPending, isSuccess, error };
+}
+
+export function useWithdraw() {
+  const {
+    writeContract,
+    ensureActiveChain,
+    hash,
+    isAwaitingWallet,
+    isTransactionPending,
+    isPending,
+    isSuccess,
+    error,
+  } = useConveyWrite();
+  const withdraw = useCallback(() => {
+    assertDeployed();
+    void activeChainWrite(writeContract, ensureActiveChain, {
+      address: CONVEY_ADDRESS,
+      abi,
+      functionName: 'withdraw',
+      args: [],
+    });
+  }, [writeContract, ensureActiveChain]);
+  return { withdraw, hash, isAwaitingWallet, isTransactionPending, isPending, isSuccess, error };
 }
 
 export function useAcceptCounter() {
