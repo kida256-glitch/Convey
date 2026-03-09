@@ -38,7 +38,9 @@ async function throwApiError(res: Response, fallback: string): Promise<never> {
         const body = await res.json() as { error?: string };
         throw new Error(body.error ?? fallback);
     } catch (e) {
-        if (e instanceof Error && e.message !== fallback) throw e;
+        // If the body wasn't JSON (e.g. Vite's HTML 404 page), use the fallback.
+        if (e instanceof SyntaxError) throw new Error(fallback);
+        if (e instanceof Error) throw e;
         throw new Error(fallback);
     }
 }
