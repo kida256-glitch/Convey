@@ -36,10 +36,11 @@ async function fetchWithRetry(url: string, options?: RequestInit, retries = 3): 
 async function throwApiError(res: Response, fallback: string): Promise<never> {
     try {
         const body = await res.json() as { error?: string };
-        throw new Error(body.error ?? fallback);
+        const msg = body.error ?? `${fallback} (HTTP ${res.status})`;
+        throw new Error(msg);
     } catch (e) {
         // If the body wasn't JSON (e.g. Vite's HTML 404 page), use the fallback.
-        if (e instanceof SyntaxError) throw new Error(fallback);
+        if (e instanceof SyntaxError) throw new Error(`${fallback} (HTTP ${res.status} — server may be starting up, try again)`);
         if (e instanceof Error) throw e;
         throw new Error(fallback);
     }
@@ -70,9 +71,13 @@ export async function publishListing(
             .insert([payload])
             .select()
             .single();
-        if (error) throw error;
+        if (error) {
+            console.error('[Convey] Supabase insert error:', error);
+            throw new Error(error.message || 'Supabase could not save the listing.');
+        }
         return data as unknown as Listing;
     }
+    console.warn('[Convey] Supabase not configured — using local Express fallback.');
     const res = await fetchWithRetry('/api/listings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
