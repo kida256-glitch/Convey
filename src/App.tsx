@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { WagmiProvider } from 'wagmi';
+import { WagmiProvider, useAccount } from 'wagmi';
 import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { config } from './wagmi';
@@ -19,7 +19,19 @@ import '@rainbow-me/rainbowkit/styles.css';
 const queryClient = new QueryClient();
 
 function AppContent() {
-  const { currentView } = useAppStore();
+  const { currentView, setRole, setCurrentView } = useAppStore();
+  const { address } = useAccount();
+  const previousAddressRef = React.useRef<string | undefined>(undefined);
+
+  React.useEffect(() => {
+    const previous = previousAddressRef.current;
+    if (previous && address && previous.toLowerCase() !== address.toLowerCase()) {
+      // Wallet changed: force role re-selection to avoid wallet-scoped empty views.
+      setRole(null);
+      setCurrentView('role-selection');
+    }
+    previousAddressRef.current = address;
+  }, [address, setRole, setCurrentView]);
 
   return (
     <div className="min-h-screen bg-avalanche-dark text-white font-sans selection:bg-avalanche-red selection:text-white">
@@ -38,7 +50,7 @@ export default function App() {
   return (
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider 
+        <RainbowKitProvider
           theme={darkTheme({
             accentColor: '#E84142',
             accentColorForeground: 'white',
