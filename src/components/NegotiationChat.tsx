@@ -43,6 +43,7 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
   const [textInput, setTextInput] = useState('');
   const [activeTab, setActiveTab] = useState<'chat' | 'offer'>('offer');
   const [purchaseDone, setPurchaseDone] = useState(false);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -143,8 +144,14 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
     if (!negotiation || existingPurchase) return;
 
     if (CONVEY_ADDRESS) {
+      const escrowListingId = listing?.onChainId ?? negotiation.onChainListingId;
+      if (!escrowListingId || escrowListingId <= 0) {
+        setPurchaseError('Escrow is only available for listings created on-chain. This listing does not have a contract listing ID yet.');
+        return;
+      }
+      setPurchaseError(null);
       // Buyer sends funds from wallet into escrow contract.
-      makeOfferOnChain(negotiation.onChainListingId ?? negotiation.listingId, negotiation.currentOffer);
+      makeOfferOnChain(escrowListingId, negotiation.currentOffer);
       return;
     }
 
@@ -472,6 +479,9 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
                 )}
                 {offerError && (
                   <p className="text-red-400 text-xs mt-1 text-center">{(offerError as Error).message.slice(0, 100)}</p>
+                )}
+                {purchaseError && (
+                  <p className="text-red-400 text-xs mt-1 text-center">{purchaseError}</p>
                 )}
               </>
             ) : (

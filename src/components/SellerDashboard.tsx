@@ -6,6 +6,9 @@ import { NegotiationChat } from './NegotiationChat';
 import { useAccount } from 'wagmi';
 import { publishListing, editListing, deleteListing } from '../lib/listingsApi';
 import { markNotificationsReadRemote } from '../lib/negotiationsApi';
+import { useCreateListing } from '../lib/useConvey';
+import { CONVEY_ADDRESS, CONVEY_ABI } from '../lib/contract';
+import { config, ACTIVE_CHAIN_ID } from '../wagmi';
 
 type ListingFormData = {
     title: string;
@@ -29,6 +32,19 @@ const EMPTY_FORM: ListingFormData = {
     images: [],
     status: 'Active',
 };
+
+async function fetchOnChainListingCount(): Promise<number> {
+    if (!CONVEY_ADDRESS) return 0;
+    const { readContract } = await import('@wagmi/core');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const count = await (readContract as any)(config, {
+        address: CONVEY_ADDRESS,
+        abi: CONVEY_ABI,
+        chainId: ACTIVE_CHAIN_ID,
+        functionName: 'listingCount',
+    });
+    return Number(count ?? 0);
+}
 
 export const SellerDashboard = () => {
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -399,7 +415,10 @@ const ListingModal = ({
     onActionResult: (toast: Toast) => void;
 }) => {
     const { addListing, updateListing, upsertListing } = useAppStore();
+    const { create: createOnChainListing, hash: createHash, isPending: createPending, isSuccess: createSuccess, error: createError } = useCreateListing();
     const [isPublishing, setIsPublishing] = useState(false);
+    const [pendingCreatePayload, setPendingCreatePayload] = useState<Omit<Listing, 'id'> | null>(null);
+    const [processedCreateHash, setProcessedCreateHash] = useState<string | null>(null);
     const [formData, setFormData] = useState<ListingFormData>(() => {
         if (!listing) {
             return EMPTY_FORM;
@@ -500,43 +519,94 @@ const ListingModal = ({
                     onClose();
                 });
         } else {
-            // Publish to shared data source (Supabase or local API).
+            // Create on-chain first so the listing has a valid contract ID for escrow funding.
+            setPendingCreatePayload(payload);
             setIsPublishing(true);
-            publishListing(payload)
-                .then((created) => {
-                    upsertListing(created);
-                    onActionResult({ type: 'success', message: 'Listing published — visible to all buyers instantly.' });
-                    onClose();
-                })
-                .catch((err: Error) => {
-                    // Only save locally if it's a network/connectivity failure, not a validation error.
-                    // A validation error (e.g. missing field) must be shown as-is so the seller can fix it.
-                    const isNetworkFailure =
-                        err.message.toLowerCase().includes('fetch') ||
-                        err.message.toLowerCase().includes('network') ||
-                        err.message.toLowerCase().includes('unavailable') ||
-                        err.message.toLowerCase().includes('failed to fetch');
-
-                    if (isNetworkFailure) {
-                        addListing(payload);
-                        onActionResult({
-                            type: 'error',
-                            message: 'Server unreachable. Listing saved locally — set up Supabase in .env so buyers on other devices can see it.',
-                        });
-                        onClose();
-                    } else {
-                        // Validation or auth error — show the actual message, don’t close the modal.
-                        onActionResult({
-                            type: 'error',
-                            message: err.message || 'Failed to publish listing. Check all required fields.',
-                        });
-                    }
-                })
-                .finally(() => {
-                    setIsPublishing(false);
-                });
+            createOnChainListing({
+                title: payload.title,
+                description: payload.description,
+                imageURI: payload.images[0] ?? '',
+                priceAvax: payload.price,
+                stock: payload.stock,
+            });
         }
     };
+
+    useEffect(() => {
+        if (!pendingCreatePayload || !createError) return;
+        onActionResult({
+            type: 'error',
+            message: (createError as Error).message || 'Failed to create listing on-chain.',
+        });
+        setPendingCreatePayload(null);
+        setIsPublishing(false);
+    }, [pendingCreatePayload, createError, onActionResult]);
+
+    useEffect(() => {
+        if (!pendingCreatePayload || !createSuccess || !createHash) return;
+        if (processedCreateHash === createHash) return;
+
+        setProcessedCreateHash(createHash);
+
+        const persistCreatedListing = async () => {
+            try {
+                const onChainId = await fetchOnChainListingCount();
+                const payloadWithOnChainId: Omit<Listing, 'id'> = { ...pendingCreatePayload, onChainId };
+
+                let created: Listing;
+                try {
+                    created = await publishListing(payloadWithOnChainId);
+                } catch (err) {
+                    const msg = (err as Error).message.toLowerCase();
+                    const schemaMissingOnChainId = msg.includes('onchainid') || msg.includes('on_chain_id');
+                    if (!schemaMissingOnChainId) throw err;
+
+                    // Backward compatibility: if backend schema lacks onChainId, save base listing and keep onChainId locally.
+                    const fallbackCreated = await publishListing(pendingCreatePayload);
+                    created = { ...fallbackCreated, onChainId };
+                }
+
+                upsertListing({ ...created, onChainId });
+                onActionResult({
+                    type: 'success',
+                    message: `Listing published on-chain (#${onChainId}) and visible to buyers.`,
+                });
+                onClose();
+            } catch (err) {
+                const message = (err as Error).message || 'Failed to publish listing.';
+                const isNetworkFailure =
+                    message.toLowerCase().includes('fetch') ||
+                    message.toLowerCase().includes('network') ||
+                    message.toLowerCase().includes('unavailable') ||
+                    message.toLowerCase().includes('failed to fetch');
+
+                if (isNetworkFailure) {
+                    addListing(pendingCreatePayload);
+                    onActionResult({
+                        type: 'error',
+                        message: 'On-chain listing created, but server was unreachable. Listing saved locally.',
+                    });
+                    onClose();
+                } else {
+                    onActionResult({ type: 'error', message });
+                }
+            } finally {
+                setPendingCreatePayload(null);
+                setIsPublishing(false);
+            }
+        };
+
+        void persistCreatedListing();
+    }, [
+        addListing,
+        createHash,
+        createSuccess,
+        onActionResult,
+        onClose,
+        pendingCreatePayload,
+        processedCreateHash,
+        upsertListing,
+    ]);
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -684,11 +754,11 @@ const ListingModal = ({
 
                     <button
                         type="submit"
-                        disabled={isPublishing}
+                        disabled={isPublishing || createPending}
                         className="w-full bg-avalanche-red hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold mt-4 transition-colors flex items-center justify-center gap-2"
                     >
-                        {isPublishing ? (
-                            <><Loader2 className="w-4 h-4 animate-spin" /> Publishing…</>
+                        {isPublishing || createPending ? (
+                            <><Loader2 className="w-4 h-4 animate-spin" /> Publishing On-Chain…</>
                         ) : isEdit ? 'Save Changes' : 'Publish Listing'}
                     </button>
                 </form>

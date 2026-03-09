@@ -5,6 +5,7 @@ import path from 'path';
 
 type Listing = {
     id: number;
+    onChainId?: number;
     title: string;
     price: number;
     stock: number;
@@ -63,6 +64,10 @@ app.post('/api/listings', (req, res) => {
     const price = Number(body.price ?? 0);
     const stock = Number(body.stock ?? 0);
     const images = Array.isArray(body.images) ? body.images.map((v: unknown) => String(v)) : [];
+    const onChainIdRaw = body.onChainId;
+    const onChainId = Number.isInteger(Number(onChainIdRaw)) && Number(onChainIdRaw) > 0
+        ? Number(onChainIdRaw)
+        : undefined;
 
     if (!title || !seller || !Number.isFinite(price) || price <= 0 || !Number.isInteger(stock) || stock < 1) {
         return res.status(400).json({ error: 'Invalid listing: title, seller address, price (> 0), and stock (≥ 1) are all required.' });
@@ -73,6 +78,7 @@ app.post('/api/listings', (req, res) => {
 
     const listing: Listing = {
         id: nextId,
+        ...(onChainId ? { onChainId } : {}),
         title,
         description,
         seller,
@@ -107,6 +113,12 @@ app.put('/api/listings/:id', (req, res) => {
     if (body.stock !== undefined) updated.stock = Number(body.stock);
     if (body.status !== undefined) updated.status = body.status;
     if (Array.isArray(body.images)) updated.images = body.images.map((v: unknown) => String(v));
+    if (body.onChainId !== undefined) {
+        const parsedOnChainId = Number(body.onChainId);
+        if (Number.isInteger(parsedOnChainId) && parsedOnChainId > 0) {
+            updated.onChainId = parsedOnChainId;
+        }
+    }
 
     listings[idx] = updated;
     writeListings(listings);

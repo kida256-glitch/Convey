@@ -193,7 +193,8 @@ export const BuyerMarketplace = () => {
       const newNegotiation: Negotiation = {
         id: Date.now().toString(),
         listingId: listing.id,
-        onChainListingId: listing.onChainId ?? listing.id,
+        // Only persist a real contract listing id; local DB ids are not valid on-chain.
+        onChainListingId: listing.onChainId,
         buyerAddress: address || '0xBuyer',
         sellerAddress: listing.seller,
         status: 'open',
