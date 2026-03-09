@@ -55,8 +55,8 @@ app.post('/api/listings', (req, res) => {
     const stock = Number(body.stock ?? 0);
     const images = Array.isArray(body.images) ? body.images.map((v: unknown) => String(v)) : [];
 
-    if (!title || !description || !seller || !Number.isFinite(price) || price <= 0 || !Number.isInteger(stock) || stock < 1) {
-        return res.status(400).json({ error: 'Invalid listing payload' });
+    if (!title || !seller || !Number.isFinite(price) || price <= 0 || !Number.isInteger(stock) || stock < 1) {
+        return res.status(400).json({ error: 'Invalid listing: title, seller address, price (> 0), and stock (≥ 1) are all required.' });
     }
 
     const listings = readListings();

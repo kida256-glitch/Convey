@@ -15,6 +15,34 @@ export { isSupabaseConfigured };
 
 // ---------- fetch ----------
 
+/** Fetch with up to `retries` automatic retries (exponential backoff). */
+async function fetchWithRetry(url: string, options?: RequestInit, retries = 3): Promise<Response> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < retries; attempt++) {
+        try {
+            const res = await fetch(url, options);
+            return res;
+        } catch (err) {
+            lastErr = err;
+            if (attempt < retries - 1) {
+                await new Promise((r) => setTimeout(r, 300 * 2 ** attempt));
+            }
+        }
+    }
+    throw lastErr;
+}
+
+/** Throw an error whose message includes the API's own error text for 4xx/5xx. */
+async function throwApiError(res: Response, fallback: string): Promise<never> {
+    try {
+        const body = await res.json() as { error?: string };
+        throw new Error(body.error ?? fallback);
+    } catch (e) {
+        if (e instanceof Error && e.message !== fallback) throw e;
+        throw new Error(fallback);
+    }
+}
+
 export async function fetchListings(): Promise<Listing[]> {
     if (isSupabaseConfigured && supabase) {
         const { data, error } = await supabase
@@ -24,8 +52,8 @@ export async function fetchListings(): Promise<Listing[]> {
         if (error) throw error;
         return (data ?? []) as unknown as Listing[];
     }
-    const res = await fetch('/api/listings');
-    if (!res.ok) throw new Error('Local API unavailable – is the dev server running?');
+    const res = await fetchWithRetry('/api/listings');
+    if (!res.ok) await throwApiError(res, 'Could not load listings from server.');
     return res.json() as Promise<Listing[]>;
 }
 
@@ -43,12 +71,12 @@ export async function publishListing(
         if (error) throw error;
         return data as unknown as Listing;
     }
-    const res = await fetch('/api/listings', {
+    const res = await fetchWithRetry('/api/listings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error('Local API unavailable – is the dev server running?');
+    if (!res.ok) await throwApiError(res, 'Could not publish listing.');
     return res.json() as Promise<Listing>;
 }
 
@@ -68,12 +96,12 @@ export async function editListing(
         if (error) throw error;
         return data as unknown as Listing;
     }
-    const res = await fetch(`/api/listings/${id}`, {
+    const res = await fetchWithRetry(`/api/listings/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
     });
-    if (!res.ok) throw new Error('Local API unavailable');
+    if (!res.ok) await throwApiError(res, 'Could not update listing.');
     return res.json() as Promise<Listing>;
 }
 
@@ -85,7 +113,7 @@ export async function deleteListing(id: number): Promise<void> {
         if (error) throw error;
         return;
     }
-    await fetch(`/api/listings/${id}`, { method: 'DELETE' });
+    await fetchWithRetry(`/api/listings/${id}`, { method: 'DELETE' });
 }
 
 // ---------- decrement stock ----------
@@ -109,8 +137,8 @@ export async function decrementListingStock(id: number): Promise<Listing> {
         if (error) throw error;
         return data as unknown as Listing;
     }
-    const res = await fetch(`/api/listings/${id}/decrement`, { method: 'POST' });
-    if (!res.ok) throw new Error('Local API unavailable');
+    const res = await fetchWithRetry(`/api/listings/${id}/decrement`, { method: 'POST' });
+    if (!res.ok) await throwApiError(res, 'Stock update failed.');
     return res.json() as Promise<Listing>;
 }
 

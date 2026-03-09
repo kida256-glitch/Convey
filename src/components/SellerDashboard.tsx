@@ -456,9 +456,18 @@ const ListingModal = ({
                 .then((updated) => {
                     upsertListing(updated);
                 })
-                .catch(() => {
-                    // Fallback to local update so the seller still sees the change.
-                    updateListing(listing.id, payload);
+                .catch((err: Error) => {
+                    // Show real error; only fall back to local update on network failures.
+                    const isNetworkFailure =
+                        err.message.toLowerCase().includes('fetch') ||
+                        err.message.toLowerCase().includes('network') ||
+                        err.message.toLowerCase().includes('unavailable');
+                    if (isNetworkFailure) {
+                        updateListing(listing.id, payload);
+                    } else {
+                        onActionResult({ type: 'error', message: err.message || 'Failed to update listing.' });
+                        return;
+                    }
                 })
                 .finally(() => {
                     setIsPublishing(false);
@@ -474,14 +483,29 @@ const ListingModal = ({
                     onActionResult({ type: 'success', message: 'Listing published — visible to all buyers instantly.' });
                     onClose();
                 })
-                .catch(() => {
-                    // Last-resort fallback: save locally so the seller can still see their listing.
-                    addListing(payload);
-                    onActionResult({
-                        type: 'error',
-                        message: 'Could not reach the shared database. Listing saved locally only — buyers on other devices won\'t see it until the connection is restored.',
-                    });
-                    onClose();
+                .catch((err: Error) => {
+                    // Only save locally if it's a network/connectivity failure, not a validation error.
+                    // A validation error (e.g. missing field) must be shown as-is so the seller can fix it.
+                    const isNetworkFailure =
+                        err.message.toLowerCase().includes('fetch') ||
+                        err.message.toLowerCase().includes('network') ||
+                        err.message.toLowerCase().includes('unavailable') ||
+                        err.message.toLowerCase().includes('failed to fetch');
+
+                    if (isNetworkFailure) {
+                        addListing(payload);
+                        onActionResult({
+                            type: 'error',
+                            message: 'Server unreachable. Listing saved locally — set up Supabase in .env so buyers on other devices can see it.',
+                        });
+                        onClose();
+                    } else {
+                        // Validation or auth error — show the actual message, don’t close the modal.
+                        onActionResult({
+                            type: 'error',
+                            message: err.message || 'Failed to publish listing. Check all required fields.',
+                        });
+                    }
                 })
                 .finally(() => {
                     setIsPublishing(false);

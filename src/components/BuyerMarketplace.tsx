@@ -14,6 +14,7 @@ export const BuyerMarketplace = () => {
   const [activeNegotiationId, setActiveNegotiationId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'info' | 'notif'; message: string } | null>(null);
   const [isLoadingListings, setIsLoadingListings] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const seenNotifIds = useRef<Set<string>>(new Set());
   const pendingPurchaseRef = useRef<{ purchase: Purchase; listingTitle: string } | null>(null);
   const { negotiations, addNegotiation, listings: storeListings, notifications, markNotificationsRead, purchases, addPurchase, decrementStock, addNotification, setListings, upsertListing } = useAppStore();
@@ -51,9 +52,14 @@ export const BuyerMarketplace = () => {
     const sync = async () => {
       try {
         const remote = await fetchListings();
-        if (!cancelled) setListings(remote);
-      } catch {
-        // Keep local state if the data source is temporarily unavailable.
+        if (!cancelled) {
+          setListings(remote);
+          setFetchError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setFetchError((err as Error).message ?? 'Could not load listings.');
+        }
       } finally {
         if (!cancelled) setIsLoadingListings(false);
       }
@@ -232,6 +238,34 @@ export const BuyerMarketplace = () => {
           >
             {toast.message}
           </div>
+        </div>
+      )}
+
+      {/* Database not configured warning */}
+      {!isSupabaseConfigured && (
+        <div className="mb-4 px-4 py-3 bg-orange-500/10 border border-orange-400/30 rounded-xl text-sm text-orange-300">
+          <strong>Local mode:</strong> Listings are stored on this machine only. Buyers on other devices cannot see them.
+          {' '}Add <code className="bg-white/10 px-1 rounded">VITE_SUPABASE_URL</code> &amp; <code className="bg-white/10 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to your <code className="bg-white/10 px-1 rounded">.env</code> file to enable cross-device sharing.
+        </div>
+      )}
+
+      {/* Fetch error banner */}
+      {fetchError && (
+        <div className="mb-4 px-4 py-3 bg-red-500/10 border border-red-400/30 rounded-xl flex items-center justify-between gap-4">
+          <span className="text-red-300 text-sm">Could not load listings: <strong>{fetchError}</strong></span>
+          <button
+            onClick={() => {
+              setFetchError(null);
+              setIsLoadingListings(true);
+              fetchListings()
+                .then((remote) => { setListings(remote); setFetchError(null); })
+                .catch((e: Error) => setFetchError(e.message))
+                .finally(() => setIsLoadingListings(false));
+            }}
+            className="shrink-0 bg-red-500 hover:bg-red-400 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
+          >
+            Retry
+          </button>
         </div>
       )}
 
