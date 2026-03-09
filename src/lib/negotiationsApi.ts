@@ -214,6 +214,11 @@ export async function updateNegotiationRemote(id: string, updates: Partial<Negot
 export async function appendMessageRemote(negotiationId: string, message: Message, extraUpdates?: Partial<Negotiation>): Promise<boolean> {
     if (!(await canUseSupabaseSync())) return false;
 
+    // Fast path: caller already computed full message list, so avoid select+update.
+    if (Array.isArray(extraUpdates?.messages)) {
+        return updateNegotiationRemote(negotiationId, extraUpdates);
+    }
+
     const { data, error } = await supabase!
         .from('negotiations')
         .select('messages')

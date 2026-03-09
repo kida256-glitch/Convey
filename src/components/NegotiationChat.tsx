@@ -304,6 +304,7 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
       amount,
       timestamp: Date.now(),
     };
+    const nextMessages = [...messages, msg];
 
     addMessage(negotiationId, msg);
     updateNegotiation(negotiationId, {
@@ -313,6 +314,7 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
     void appendMessageRemote(negotiationId, msg, {
       currentOffer: amount,
       status: currentUserRole === 'seller' ? 'countered' : 'open',
+      messages: nextMessages,
     });
 
     const otherRole: 'buyer' | 'seller' = currentUserRole === 'buyer' ? 'seller' : 'buyer';
@@ -340,9 +342,10 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
       type: 'text',
       timestamp: Date.now(),
     };
+    const nextMessages = [...messages, msg];
 
     addMessage(negotiationId, msg);
-    void appendMessageRemote(negotiationId, msg);
+    void appendMessageRemote(negotiationId, msg, { messages: nextMessages });
 
     const otherRole: 'buyer' | 'seller' = currentUserRole === 'buyer' ? 'seller' : 'buyer';
     const textNotification = {
@@ -370,10 +373,15 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
       amount: pendingOffer,
       timestamp: Date.now(),
     };
+    const nextMessages = [...messages, msg];
 
     addMessage(negotiationId, msg);
     updateNegotiation(negotiationId, { status: 'accepted', currentOffer: pendingOffer });
-    void appendMessageRemote(negotiationId, msg, { status: 'accepted', currentOffer: pendingOffer });
+    void appendMessageRemote(negotiationId, msg, {
+      status: 'accepted',
+      currentOffer: pendingOffer,
+      messages: nextMessages,
+    });
 
     const otherRole: 'buyer' | 'seller' = currentUserRole === 'buyer' ? 'seller' : 'buyer';
     const acceptNotification = {
@@ -396,10 +404,11 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
       type: 'text',
       timestamp: Date.now(),
     };
+    const nextMessages = [...messages, msg];
 
     addMessage(negotiationId, msg);
     updateNegotiation(negotiationId, { status: 'rejected' });
-    void appendMessageRemote(negotiationId, msg, { status: 'rejected' });
+    void appendMessageRemote(negotiationId, msg, { status: 'rejected', messages: nextMessages });
 
     const otherRole: 'buyer' | 'seller' = currentUserRole === 'buyer' ? 'seller' : 'buyer';
     const rejectNotification = {

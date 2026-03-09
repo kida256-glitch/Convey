@@ -14,7 +14,7 @@ import { SellerDashboard } from './components/SellerDashboard';
 import { BuyerMarketplace } from './components/BuyerMarketplace';
 import { Navbar } from './components/Navbar';
 import { useAppStore } from './store/useAppStore';
-import { subscribeToNegotiationState } from './lib/negotiationsApi';
+import { subscribeToNegotiationState, syncNegotiationState } from './lib/negotiationsApi';
 import '@rainbow-me/rainbowkit/styles.css';
 
 const queryClient = new QueryClient();
@@ -37,6 +37,19 @@ function AppContent() {
   React.useEffect(() => {
     let cleanup: (() => void) | null = null;
     let cancelled = false;
+    const pullState = async () => {
+      const state = await syncNegotiationState();
+      if (!state || cancelled) return;
+      setNegotiations(state.negotiations);
+      setNotifications(state.notifications);
+      setPurchases(state.purchases);
+    };
+
+    // Fallback polling keeps data fresh when realtime events are delayed.
+    void pullState();
+    const pollingId = window.setInterval(() => {
+      void pullState();
+    }, 3000);
 
     void subscribeToNegotiationState((state) => {
       if (cancelled) return;
@@ -53,6 +66,7 @@ function AppContent() {
 
     return () => {
       cancelled = true;
+      window.clearInterval(pollingId);
       if (cleanup) cleanup();
     };
   }, [setNegotiations, setNotifications, setPurchases]);
