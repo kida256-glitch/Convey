@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Filter, DollarSign, Bell, MessageSquare, X, ShoppingBag, Zap, ChevronLeft, ChevronRight, ImageOff, Loader2 } from 'lucide-react';
-import { useAppStore, Purchase } from '../store/useAppStore';
+import { useAppStore, Purchase, Negotiation, AppNotification } from '../store/useAppStore';
 import { NegotiationChat } from './NegotiationChat';
 import { useAccount, useChainId, useSwitchChain, useSendTransaction, useWaitForTransactionReceipt } from 'wagmi';
 import { parseEther } from 'viem';
 import { useAvaxPrice } from '../hooks/useAvaxPrice';
 import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME } from '../wagmi';
 import { fetchListings, decrementListingStock, subscribeToListings, isSupabaseConfigured, configReady } from '../lib/listingsApi';
+import { addNotificationRemote, addPurchaseRemote, markNotificationsReadRemote, upsertNegotiationRemote } from '../lib/negotiationsApi';
 
 export const BuyerMarketplace = () => {
   const [selectedListing, setSelectedListing] = useState<any>(null);
@@ -31,7 +32,9 @@ export const BuyerMarketplace = () => {
   const onWrongNetwork = !!address && chainId !== ACTIVE_CHAIN_ID;
 
   const buyerId = address || '0xBuyer';
-  const normalizedAddress = (address || '').toLowerCase();
+  const normalizeAddress = (value?: string | null) => (value ?? '').toLowerCase();
+  const normalizedAddress = normalizeAddress(address);
+  const hasConnectedBuyer = !!address;
   const isOwnListing = (listing: any) =>
     !!normalizedAddress && (listing?.seller || '').toLowerCase() === normalizedAddress;
   // Listings are local-first so sellers can publish without wallet confirmation.
@@ -39,10 +42,18 @@ export const BuyerMarketplace = () => {
   // Show every active listing immediately, even if it belongs to the connected wallet.
   // Purchase/offer actions are still blocked for own listings in the modal.
   const marketListings = allListings.filter((listing) => listing.status === 'Active');
-  const myPurchases = purchases.filter((p) => p.buyerAddress === buyerId);
+  const myPurchases = purchases.filter((p) =>
+    hasConnectedBuyer
+      ? normalizeAddress(p.buyerAddress) === normalizedAddress
+      : p.buyerAddress === buyerId,
+  );
 
   // Buyer's own negotiations and unread counts
-  const myNegotiations = negotiations.filter((n) => n.buyerAddress === (address || '0xBuyer'));
+  const myNegotiations = negotiations.filter((n) =>
+    hasConnectedBuyer
+      ? normalizeAddress(n.buyerAddress) === normalizedAddress
+      : n.buyerAddress === '0xBuyer',
+  );
   const buyerNotifs = notifications.filter((n) => n.forRole === 'buyer' && !n.read);
   const unreadByNeg = (negId: string) => buyerNotifs.filter((n) => n.negotiationId === negId).length;
   const totalUnread = buyerNotifs.length;
@@ -129,6 +140,7 @@ export const BuyerMarketplace = () => {
     pendingPurchaseRef.current = null;
 
     addPurchase({ ...purchase, txHash: payHash });
+    void addPurchaseRemote({ ...purchase, txHash: payHash });
     decrementStock(purchase.listingId);
     void decrementListingStock(purchase.listingId)
       .then((updated) => {
@@ -137,14 +149,16 @@ export const BuyerMarketplace = () => {
       .catch(() => {
         // Local decrement already applied — server will sync on next poll.
       });
-    addNotification({
+    const sellerNotification: AppNotification = {
       id: `${payHash}-buynow-notif`,
       negotiationId: purchase.negotiationId,
       forRole: 'seller',
       preview: `Your item "${listingTitle}" was purchased at full price (${purchase.amount} AVAX)!`,
       read: false,
       timestamp: Date.now(),
-    });
+    };
+    addNotification(sellerNotification);
+    void addNotificationRemote(sellerNotification);
     setToast({ type: 'success', message: `Purchase confirmed! Hash: ${payHash.slice(0, 12)}…` });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paySuccess, payHash, decrementStock, addPurchase, addNotification, upsertListing]);
@@ -163,16 +177,21 @@ export const BuyerMarketplace = () => {
     }
 
     // Check if negotiation already exists
-    const existing = negotiations.find(n => n.listingId === listing.id && n.buyerAddress === address);
+    const existing = negotiations.find((n) =>
+      n.listingId === listing.id &&
+      (hasConnectedBuyer
+        ? normalizeAddress(n.buyerAddress) === normalizedAddress
+        : n.buyerAddress === '0xBuyer')
+    );
 
     if (existing) {
       setActiveNegotiationId(existing.id);
       markNotificationsRead(existing.id, 'buyer');
+      void markNotificationsReadRemote(existing.id, 'buyer');
       setToast({ type: 'info', message: 'Opened your existing negotiation.' });
     } else {
-      const newId = Date.now().toString();
-      addNegotiation({
-        id: newId,
+      const newNegotiation: Negotiation = {
+        id: Date.now().toString(),
         listingId: listing.id,
         onChainListingId: listing.onChainId ?? listing.id,
         buyerAddress: address || '0xBuyer',
@@ -180,8 +199,10 @@ export const BuyerMarketplace = () => {
         status: 'open',
         currentOffer: 0,
         messages: [],
-      });
-      setActiveNegotiationId(newId);
+      };
+      addNegotiation(newNegotiation);
+      void upsertNegotiationRemote(newNegotiation);
+      setActiveNegotiationId(newNegotiation.id);
       setToast({ type: 'success', message: 'Negotiation started successfully.' });
     }
     setSelectedListing(null); // Close detail modal
@@ -332,6 +353,7 @@ export const BuyerMarketplace = () => {
                   onClick={() => {
                     setActiveNegotiationId(neg.id);
                     markNotificationsRead(neg.id, 'buyer');
+                    void markNotificationsReadRemote(neg.id, 'buyer');
                   }}
                   className="relative bg-avalanche-dark-light border border-white/10 hover:border-avalanche-red/50 px-4 py-3 rounded-xl text-left transition-all"
                 >
@@ -423,6 +445,7 @@ export const BuyerMarketplace = () => {
           onClose={() => {
             setActiveNegotiationId(null);
             markNotificationsRead(activeNegotiationId, 'buyer');
+            void markNotificationsReadRemote(activeNegotiationId, 'buyer');
           }}
           currentUserRole="buyer"
         />

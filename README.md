@@ -24,7 +24,7 @@ This project currently uses a hybrid flow:
 
 ### Negotiation flow
 - Buyers and sellers can exchange offers and messages in-app.
-- Negotiation state and notifications are stored in the app store.
+- Negotiation state, notifications, and purchases can be synced in Supabase for real-time cross-device delivery.
 
 ## Current State Model
 
@@ -68,6 +68,21 @@ Common variables:
 Important:
 - Never commit `.env` files or private keys.
 - Only commit template files like `.env.example`.
+
+## Enable Realtime Negotiations (Supabase)
+
+To make buyer/seller chat and negotiation events sync across different devices/browsers:
+
+1. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env`.
+2. Open Supabase SQL Editor.
+3. Run `supabase/negotiations_schema.sql`.
+
+This creates:
+- `negotiations`
+- `notifications`
+- `purchases`
+
+The frontend subscribes to these tables and updates chat state in real time.
 
 ## Smart Contracts (Optional)
 

@@ -5,6 +5,7 @@ import { useAppStore, Message, Purchase } from '../store/useAppStore';
 import { useMakeOffer, useAcceptOffer, useAllOnChainListings } from '../lib/useConvey';
 import { CONVEY_ADDRESS, CONVEY_ABI } from '../lib/contract';
 import { config, ACTIVE_CHAIN_ID } from '../wagmi';
+import { addNotificationRemote, addPurchaseRemote, appendMessageRemote, updateNegotiationRemote, upsertNegotiationRemote } from '../lib/negotiationsApi';
 
 // readContract from @wagmi/core for imperative reads
 async function fetchListingOffers(listingId: number): Promise<readonly bigint[]> {
@@ -64,8 +65,10 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
       txHash: offerTxHash,
     };
     addPurchase(purchase);
+    void addPurchaseRemote(purchase);
     setPurchaseDone(true);
     updateNegotiation(negotiationId, { paymentTxHash: offerTxHash ?? undefined });
+    void updateNegotiationRemote(negotiationId, { paymentTxHash: offerTxHash ?? undefined });
 
     // Fetch the newly created on-chain offerId so the seller can release it
     const offerLookupListingId = negotiation.onChainListingId ?? 0;
@@ -74,18 +77,21 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
         if (Array.isArray(ids) && ids.length > 0) {
           const latestId = Number(ids[ids.length - 1]);
           updateNegotiation(negotiationId, { onChainOfferId: latestId });
+          void updateNegotiationRemote(negotiationId, { onChainOfferId: latestId });
         }
       }).catch(() => {/* ignore read errors */ });
     }
 
-    addNotification({
+    const purchaseNotification = {
       id: `${Date.now()}-purchase-notif`,
       negotiationId,
       forRole: 'seller',
       preview: `Buyer completed purchase of "${listing?.title ?? `Item #${negotiation.listingId}`}" for ${negotiation.currentOffer} AVAX! Funds are in escrow — release them.`,
       read: false,
       timestamp: Date.now(),
-    });
+    } as const;
+    addNotification(purchaseNotification);
+    void addNotificationRemote(purchaseNotification);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offerSuccess]);
 
@@ -93,14 +99,16 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
   useEffect(() => {
     if (!releaseSuccess || !negotiation) return;
     decrementStock(negotiation.listingId);
-    addNotification({
+    const releaseNotification = {
       id: `${Date.now()}-released-notif`,
       negotiationId,
       forRole: 'buyer',
       preview: `Seller released the funds — your purchase of "${listing?.title}" is complete!`,
       read: false,
       timestamp: Date.now(),
-    });
+    } as const;
+    addNotification(releaseNotification);
+    void addNotificationRemote(releaseNotification);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [releaseSuccess]);
 
@@ -155,17 +163,20 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
       completedAt: Date.now(),
     };
     addPurchase(purchase);
+    void addPurchaseRemote(purchase);
     decrementStock(negotiation.listingId);
     setPurchaseDone(true);
 
-    addNotification({
+    const localPurchaseNotification = {
       id: `${Date.now()}-purchase-notif`,
       negotiationId,
       forRole: 'seller',
       preview: `Buyer completed purchase of "${listing?.title ?? `Item #${negotiation.listingId}`}" for ${negotiation.currentOffer} AVAX! Item is now sold.`,
       read: false,
       timestamp: Date.now(),
-    });
+    } as const;
+    addNotification(localPurchaseNotification);
+    void addNotificationRemote(localPurchaseNotification);
   };
 
   const handleReleasePurchase = () => {
@@ -198,16 +209,22 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
       currentOffer: amount,
       status: currentUserRole === 'seller' ? 'countered' : 'open',
     });
+    void appendMessageRemote(negotiationId, msg, {
+      currentOffer: amount,
+      status: currentUserRole === 'seller' ? 'countered' : 'open',
+    });
 
     const otherRole: 'buyer' | 'seller' = currentUserRole === 'buyer' ? 'seller' : 'buyer';
-    addNotification({
+    const offerNotification = {
       id: `${Date.now()}-offer`,
       negotiationId,
       forRole: otherRole,
       preview: msg.text,
       read: false,
       timestamp: Date.now(),
-    });
+    } as const;
+    addNotification(offerNotification);
+    void addNotificationRemote(offerNotification);
 
     setOfferAmount('');
   };
@@ -224,16 +241,19 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
     };
 
     addMessage(negotiationId, msg);
+    void appendMessageRemote(negotiationId, msg);
 
     const otherRole: 'buyer' | 'seller' = currentUserRole === 'buyer' ? 'seller' : 'buyer';
-    addNotification({
+    const textNotification = {
       id: `${Date.now()}-text`,
       negotiationId,
       forRole: otherRole,
       preview: msg.text,
       read: false,
       timestamp: Date.now(),
-    });
+    } as const;
+    addNotification(textNotification);
+    void addNotificationRemote(textNotification);
 
     setTextInput('');
   };
@@ -252,16 +272,19 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
 
     addMessage(negotiationId, msg);
     updateNegotiation(negotiationId, { status: 'accepted', currentOffer: pendingOffer });
+    void appendMessageRemote(negotiationId, msg, { status: 'accepted', currentOffer: pendingOffer });
 
     const otherRole: 'buyer' | 'seller' = currentUserRole === 'buyer' ? 'seller' : 'buyer';
-    addNotification({
+    const acceptNotification = {
       id: `${Date.now()}-accept`,
       negotiationId,
       forRole: otherRole,
       preview: msg.text,
       read: false,
       timestamp: Date.now(),
-    });
+    } as const;
+    addNotification(acceptNotification);
+    void addNotificationRemote(acceptNotification);
   };
 
   const handleReject = () => {
@@ -275,17 +298,25 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
 
     addMessage(negotiationId, msg);
     updateNegotiation(negotiationId, { status: 'rejected' });
+    void appendMessageRemote(negotiationId, msg, { status: 'rejected' });
 
     const otherRole: 'buyer' | 'seller' = currentUserRole === 'buyer' ? 'seller' : 'buyer';
-    addNotification({
+    const rejectNotification = {
       id: `${Date.now()}-reject`,
       negotiationId,
       forRole: otherRole,
       preview: 'Offer declined.',
       read: false,
       timestamp: Date.now(),
-    });
+    } as const;
+    addNotification(rejectNotification);
+    void addNotificationRemote(rejectNotification);
   };
+
+  useEffect(() => {
+    // Ensure the negotiation row exists remotely whenever the chat opens.
+    void upsertNegotiationRemote(negotiation);
+  }, [negotiation]);
 
   const statusColor =
     negotiation.status === 'accepted'

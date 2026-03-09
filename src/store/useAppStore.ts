@@ -69,6 +69,7 @@ interface AppState {
   setCurrentView: (view: 'landing' | 'role-selection' | 'dashboard' | 'marketplace') => void;
 
   negotiations: Negotiation[];
+  setNegotiations: (negotiations: Negotiation[]) => void;
   addNegotiation: (negotiation: Negotiation) => void;
   updateNegotiation: (id: string, updates: Partial<Negotiation>) => void;
   addMessage: (negotiationId: string, message: Message) => void;
@@ -83,10 +84,12 @@ interface AppState {
   setListingOnChainId: (localId: number, onChainId: number) => void;
 
   notifications: AppNotification[];
+  setNotifications: (notifications: AppNotification[]) => void;
   addNotification: (n: AppNotification) => void;
   markNotificationsRead: (negotiationId: string, role: 'buyer' | 'seller') => void;
 
   purchases: Purchase[];
+  setPurchases: (purchases: Purchase[]) => void;
   addPurchase: (purchase: Purchase) => void;
 }
 
@@ -99,6 +102,7 @@ export const useAppStore = create<AppState>()(
       setCurrentView: (view) => set({ currentView: view }),
 
       negotiations: [],
+      setNegotiations: (negotiations) => set(() => ({ negotiations })),
       addNegotiation: (negotiation) => set((state) => ({ negotiations: [...state.negotiations, negotiation] })),
       updateNegotiation: (id, updates) => set((state) => ({
         negotiations: state.negotiations.map((n) => n.id === id ? { ...n, ...updates } : n)
@@ -110,10 +114,12 @@ export const useAppStore = create<AppState>()(
       })),
 
       purchases: [],
+      setPurchases: (purchases) => set(() => ({ purchases })),
       addPurchase: (purchase) =>
         set((state) => ({ purchases: [...state.purchases, purchase] })),
 
       notifications: [],
+      setNotifications: (notifications) => set(() => ({ notifications })),
       addNotification: (n) =>
         set((state) => ({ notifications: [...state.notifications, n] })),
       markNotificationsRead: (negotiationId, role) =>

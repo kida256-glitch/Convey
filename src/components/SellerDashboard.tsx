@@ -5,6 +5,7 @@ import { Listing, useAppStore } from '../store/useAppStore';
 import { NegotiationChat } from './NegotiationChat';
 import { useAccount } from 'wagmi';
 import { publishListing, editListing, deleteListing } from '../lib/listingsApi';
+import { markNotificationsReadRemote } from '../lib/negotiationsApi';
 
 type ListingFormData = {
     title: string;
@@ -40,12 +41,35 @@ export const SellerDashboard = () => {
     const { listings, negotiations, notifications, markNotificationsRead, purchases, removeListing } = useAppStore();
 
     const sellerId = address || '0xSeller';
+    const normalizeAddress = (value?: string | null) => (value ?? '').toLowerCase();
+    const activeSellerAddress = normalizeAddress(address);
+    const hasConnectedSeller = !!address;
     const [confirmUnlistId, setConfirmUnlistId] = useState<number | null>(null);
-    const myListings = useMemo(() => listings.filter((listing) => listing.seller === sellerId), [listings, sellerId]);
-    const myNegotiations = negotiations.filter((negotiation) =>
-        myListings.some((listing) => listing.id === negotiation.listingId || listing.onChainId === negotiation.listingId)
+    const myListings = useMemo(
+        () => listings.filter((listing) =>
+            hasConnectedSeller
+                ? normalizeAddress(listing.seller) === activeSellerAddress
+                : listing.seller === sellerId,
+        ),
+        [listings, hasConnectedSeller, activeSellerAddress, sellerId],
     );
-    const mySales = purchases.filter((p) => p.sellerAddress === sellerId);
+    const myNegotiations = negotiations.filter((negotiation) => {
+        // Prefer direct wallet matching so negotiations remain visible even if listing IDs drift.
+        const directSellerMatch = hasConnectedSeller
+            ? normalizeAddress(negotiation.sellerAddress) === activeSellerAddress
+            : negotiation.sellerAddress === sellerId;
+
+        if (directSellerMatch) return true;
+
+        return myListings.some(
+            (listing) => listing.id === negotiation.listingId || listing.onChainId === negotiation.onChainListingId,
+        );
+    });
+    const mySales = purchases.filter((p) =>
+        hasConnectedSeller
+            ? normalizeAddress(p.sellerAddress) === activeSellerAddress
+            : p.sellerAddress === sellerId,
+    );
 
     // Unread notification counts per negotiation for the seller
     const sellerNotifs = notifications.filter((n) => n.forRole === 'seller' && !n.read);
@@ -126,6 +150,7 @@ export const SellerDashboard = () => {
                                     onClick={() => {
                                         setActiveNegotiationId(negotiation.id);
                                         markNotificationsRead(negotiation.id, 'seller');
+                                        void markNotificationsReadRemote(negotiation.id, 'seller');
                                     }}
                                     className="bg-avalanche-dark-light border border-white/10 p-5 rounded-2xl cursor-pointer hover:border-avalanche-red/50 transition-all relative"
                                 >

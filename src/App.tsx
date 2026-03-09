@@ -14,12 +14,13 @@ import { SellerDashboard } from './components/SellerDashboard';
 import { BuyerMarketplace } from './components/BuyerMarketplace';
 import { Navbar } from './components/Navbar';
 import { useAppStore } from './store/useAppStore';
+import { subscribeToNegotiationState } from './lib/negotiationsApi';
 import '@rainbow-me/rainbowkit/styles.css';
 
 const queryClient = new QueryClient();
 
 function AppContent() {
-  const { currentView, setRole, setCurrentView } = useAppStore();
+  const { currentView, setRole, setCurrentView, setNegotiations, setNotifications, setPurchases } = useAppStore();
   const { address } = useAccount();
   const previousAddressRef = React.useRef<string | undefined>(undefined);
 
@@ -32,6 +33,29 @@ function AppContent() {
     }
     previousAddressRef.current = address;
   }, [address, setRole, setCurrentView]);
+
+  React.useEffect(() => {
+    let cleanup: (() => void) | null = null;
+    let cancelled = false;
+
+    void subscribeToNegotiationState((state) => {
+      if (cancelled) return;
+      setNegotiations(state.negotiations);
+      setNotifications(state.notifications);
+      setPurchases(state.purchases);
+    }).then((unsubscribe) => {
+      if (cancelled) {
+        unsubscribe();
+      } else {
+        cleanup = unsubscribe;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      if (cleanup) cleanup();
+    };
+  }, [setNegotiations, setNotifications, setPurchases]);
 
   return (
     <div className="min-h-screen bg-avalanche-dark text-white font-sans selection:bg-avalanche-red selection:text-white">
