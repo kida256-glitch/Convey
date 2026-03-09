@@ -1,84 +1,95 @@
-# Convey - Decentralized Bargaining Marketplace
+# Convey Marketplace
 
-Convey is a Web3 marketplace built on Avalanche that enables buyers and sellers to negotiate prices in real-time using smart contracts with escrow functionality.
+Convey is a two-sided marketplace app where sellers can publish products and buyers can negotiate or buy with AVAX.
 
-## 🚀 Features
+This project currently uses a hybrid flow:
+- Listing creation is handled in the frontend app state (no wallet confirmation on publish).
+- Buyer checkout triggers a real wallet transaction (buyer sends AVAX to seller).
+- Smart contracts are included in `blockchain/` and can be deployed separately for contract-driven flows.
 
-- **Decentralized Escrow**: Funds are locked in smart contracts until both parties agree.
-- **Real-time Bargaining**: Make offers, counter-offers, and accept deals instantly.
-- **Avalanche Powered**: Fast, low-cost transactions on the C-Chain.
-- **Chainlink Integration**: Real-time AVAX/USD price feeds for accurate valuation.
-- **Modern UI**: Glassmorphism design with smooth Framer Motion animations.
+## What The App Does
 
-## 🛠 Tech Stack
+### Seller flow
+1. Connect wallet.
+2. Choose `Seller` role.
+3. Publish a listing with title, description, price, stock, and images.
+4. Listing appears immediately in the marketplace without a wallet signature popup.
 
-- **Frontend**: React, Vite, TailwindCSS, Framer Motion
-- **Web3**: Wagmi, Viem, RainbowKit
-- **Smart Contracts**: Solidity ^0.8.20, OpenZeppelin
-- **Blockchain**: Avalanche C-Chain (Fuji Testnet / Mainnet)
+### Buyer flow
+1. Connect wallet.
+2. Choose `Buyer` role.
+3. Browse active listings.
+4. Click `Buy Now` to trigger wallet confirmation.
+5. After on-chain payment confirmation, stock and purchase history update in the UI.
 
-## 📦 Installation
+### Negotiation flow
+- Buyers and sellers can exchange offers and messages in-app.
+- Negotiation state and notifications are stored in the app store.
 
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Create a `.env` file based on `.env.example`
-4. Start the development server:
-   ```bash
-   npm run dev
-   ```
+## Current State Model
 
-## 🏗 Architecture
+The frontend store (Zustand) is persisted in `localStorage`, so listings and marketplace activity survive wallet switching and page reloads on the same browser profile.
 
-```ascii
-+---------------------------------------------------------------+
-|                        User Interface                         |
-|  (Next.js / React / Tailwind / Framer Motion / RainbowKit)    |
-+-------------------------------+-------------------------------+
-                                |
-                                v
-+-------------------------------+-------------------------------+
-|                       Web3 Libraries                          |
-|                   (Wagmi / Viem / Ethers)                     |
-+-------------------------------+-------------------------------+
-                                |
-                                v
-+-------------------------------+-------------------------------+
-|                   Avalanche C-Chain (RPC)                     |
-+---------------+-------------------------------+---------------+
-                |                               |
-                v                               v
-+-------------------------------+   +---------------------------+
-|      ConveyMarketplace.sol    |   |   Chainlink Price Feed    |
-|  (Escrow, Offers, Listings)   |   |       (AVAX / USD)        |
-+-------------------------------+   +---------------------------+
+## Tech Stack
+
+- Frontend: React, TypeScript, Vite, Framer Motion
+- Web3: Wagmi, Viem, RainbowKit
+- State: Zustand (persisted)
+- Contracts: Solidity + Hardhat + OpenZeppelin (inside `blockchain/`)
+- Network support: Avalanche Fuji and Avalanche C-Chain (configurable)
+
+## Project Structure
+
+- `src/`: frontend app
+- `src/components/`: marketplace UI
+- `src/store/`: global state
+- `src/lib/`: wallet/contract helpers
+- `blockchain/`: contracts, tests, deploy scripts
+
+## Run The Frontend
+
+```bash
+npm install
+npm run dev
 ```
 
-## 🏗 Smart Contract Architecture
+App runs on:
+- `http://localhost:3000`
 
-The `ConveyMarketplace.sol` contract handles:
-- Listing creation
-- Offer management (Make, Counter, Accept)
-- Escrow fund holding
-- Fund release upon completion
+## Environment Variables
 
-## 🔗 Deployment
+Create `.env` from `.env.example` and set only what you need.
 
-To deploy the smart contracts:
-1. Configure your `hardhat.config.ts` (not included in this preview) with Avalanche Fuji settings.
-2. Run deployment script.
-3. Update the frontend with the new contract address.
+Common variables:
+- `VITE_TARGET_CHAIN=fuji` or `avalanche`
+- `VITE_CONTRACT_ADDRESS=0x...` (optional, for contract-linked flows)
+- `VITE_WALLETCONNECT_PROJECT_ID=...` (optional)
 
-## 🛡 Security
+Important:
+- Never commit `.env` files or private keys.
+- Only commit template files like `.env.example`.
 
-- **ReentrancyGuard**: Protects against reentrancy attacks.
-- **Ownable**: Contract ownership management.
-- **Escrow**: Funds are only released when the agreed conditions are met.
+## Smart Contracts (Optional)
 
-## 🔮 Future Improvements
+Contracts live in `blockchain/` and include:
+- `ConveyMarketplace.sol`
+- Hardhat test suite
+- Deploy scripts for Fuji and Avalanche mainnet
 
-- IPFS integration for decentralized image storage.
-- User reputation system.
-- Dispute resolution mechanism (DAO-based).
+Basic commands:
+
+```bash
+cd blockchain
+npm install
+npm run compile
+npm run test
+npm run deploy:fuji
+# or
+npm run deploy:avalanche
+```
+
+## Notes For Contributors
+
+- Keep UI behavior consistent with the current product decision:
+  listing publish without wallet confirmation, payment on buyer checkout.
+- If you change payment architecture (for example, full escrow contract flow), update this README in the same PR.
