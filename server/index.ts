@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -40,6 +41,14 @@ function writeListings(listings: Listing[]) {
 
 app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
+});
+
+// Expose runtime config so the browser can init Supabase even with a stale cached bundle.
+app.get('/api/config', (_req, res) => {
+    res.json({
+        supabaseUrl: process.env.VITE_SUPABASE_URL ?? '',
+        supabaseAnonKey: process.env.VITE_SUPABASE_ANON_KEY ?? '',
+    });
 });
 
 app.get('/api/listings', (_req, res) => {

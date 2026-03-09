@@ -8,7 +8,7 @@
  *   → Falls back to the local Express API at /api/listings.
  *     Works for same-device testing; run `npm run dev` to start the server.
  */
-import { supabase, isSupabaseConfigured } from './supabase';
+import { supabase, isSupabaseConfigured, configReady } from './supabase';
 import type { Listing } from '../store/useAppStore';
 
 export { isSupabaseConfigured };
@@ -47,6 +47,7 @@ async function throwApiError(res: Response, fallback: string): Promise<never> {
 }
 
 export async function fetchListings(): Promise<Listing[]> {
+    await configReady;
     if (isSupabaseConfigured && supabase) {
         const { data, error } = await supabase
             .from('listings')
@@ -65,6 +66,7 @@ export async function fetchListings(): Promise<Listing[]> {
 export async function publishListing(
     payload: Omit<Listing, 'id'>,
 ): Promise<Listing> {
+    await configReady;
     if (isSupabaseConfigured && supabase) {
         const { data, error } = await supabase
             .from('listings')
@@ -93,6 +95,7 @@ export async function editListing(
     id: number,
     updates: Partial<Omit<Listing, 'id'>>,
 ): Promise<Listing> {
+    await configReady;
     if (isSupabaseConfigured && supabase) {
         const { data, error } = await supabase
             .from('listings')
@@ -115,6 +118,7 @@ export async function editListing(
 // ---------- delete ----------
 
 export async function deleteListing(id: number): Promise<void> {
+    await configReady;
     if (isSupabaseConfigured && supabase) {
         const { error } = await supabase.from('listings').delete().eq('id', id);
         if (error) throw error;
@@ -126,6 +130,7 @@ export async function deleteListing(id: number): Promise<void> {
 // ---------- decrement stock ----------
 
 export async function decrementListingStock(id: number): Promise<Listing> {
+    await configReady;
     if (isSupabaseConfigured && supabase) {
         // Read current stock, then update atomically via a single round-trip.
         const { data: current, error: readErr } = await supabase
