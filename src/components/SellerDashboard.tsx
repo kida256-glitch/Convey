@@ -9,6 +9,7 @@ import { markNotificationsReadRemote } from '../lib/negotiationsApi';
 import { useCreateListing } from '../lib/useConvey';
 import { CONVEY_ADDRESS, CONVEY_ABI } from '../lib/contract';
 import { config, ACTIVE_CHAIN_ID } from '../wagmi';
+import { decodeEventLog } from 'viem';
 
 type ListingFormData = {
     title: string;
@@ -44,6 +45,35 @@ async function fetchOnChainListingCount(): Promise<number> {
         functionName: 'listingCount',
     });
     return Number(count ?? 0);
+}
+
+async function fetchCreatedListingIdFromTx(txHash: `0x${string}`): Promise<number | null> {
+    if (!CONVEY_ADDRESS) return null;
+    const { waitForTransactionReceipt } = await import('@wagmi/core');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const receipt = await (waitForTransactionReceipt as any)(config, {
+        chainId: ACTIVE_CHAIN_ID,
+        hash: txHash,
+    });
+
+    for (const log of receipt.logs ?? []) {
+        if (!log?.address || log.address.toLowerCase() !== CONVEY_ADDRESS.toLowerCase()) continue;
+        try {
+            const decoded = decodeEventLog({
+                abi: CONVEY_ABI,
+                data: log.data,
+                topics: log.topics,
+            }) as { eventName: string; args?: { listingId?: bigint } };
+            if (decoded.eventName === 'ListingCreated') {
+                const id = Number(decoded.args?.listingId ?? 0n);
+                if (id > 0) return id;
+            }
+        } catch {
+            // Ignore unrelated logs.
+        }
+    }
+
+    return null;
 }
 
 export const SellerDashboard = () => {
@@ -550,7 +580,8 @@ const ListingModal = ({
 
         const persistCreatedListing = async () => {
             try {
-                const onChainId = await fetchOnChainListingCount();
+                const eventListingId = await fetchCreatedListingIdFromTx(createHash);
+                const onChainId = eventListingId ?? await fetchOnChainListingCount();
                 const payloadWithOnChainId: Omit<Listing, 'id'> = { ...pendingCreatePayload, onChainId };
 
                 let created: Listing;
