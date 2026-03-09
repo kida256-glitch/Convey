@@ -7,7 +7,7 @@ import { useAccount, useChainId, useSwitchChain, useSendTransaction, useWaitForT
 import { parseEther } from 'viem';
 import { useAvaxPrice } from '../hooks/useAvaxPrice';
 import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME } from '../wagmi';
-import { fetchListings, decrementListingStock, subscribeToListings, isSupabaseConfigured } from '../lib/listingsApi';
+import { fetchListings, decrementListingStock, subscribeToListings, isSupabaseConfigured, configReady } from '../lib/listingsApi';
 
 export const BuyerMarketplace = () => {
   const [selectedListing, setSelectedListing] = useState<any>(null);
@@ -15,6 +15,7 @@ export const BuyerMarketplace = () => {
   const [toast, setToast] = useState<{ type: 'success' | 'info' | 'notif'; message: string } | null>(null);
   const [isLoadingListings, setIsLoadingListings] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [supabaseReady, setSupabaseReady] = useState<boolean>(isSupabaseConfigured);
   const seenNotifIds = useRef<Set<string>>(new Set());
   const pendingPurchaseRef = useRef<{ purchase: Purchase; listingTitle: string } | null>(null);
   const { negotiations, addNegotiation, listings: storeListings, notifications, markNotificationsRead, purchases, addPurchase, decrementStock, addNotification, setListings, upsertListing } = useAppStore();
@@ -47,6 +48,12 @@ export const BuyerMarketplace = () => {
   const totalUnread = buyerNotifs.length;
 
   useEffect(() => {
+    void configReady.then(() => {
+      setSupabaseReady(isSupabaseConfigured);
+    });
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     const sync = async () => {
@@ -70,7 +77,7 @@ export const BuyerMarketplace = () => {
 
     let pollingId: number | null = null;
 
-    if (isSupabaseConfigured) {
+    if (supabaseReady) {
       // Real-time: Supabase pushes changes instantly — no polling needed.
       const unsubscribe = subscribeToListings((listings) => {
         if (!cancelled) setListings(listings);
@@ -88,7 +95,7 @@ export const BuyerMarketplace = () => {
       cancelled = true;
       if (pollingId !== null) window.clearInterval(pollingId);
     };
-  }, [setListings]);
+  }, [setListings, supabaseReady]);
 
   // Watch for new buyer notifications and surface a popup, once per notification
   useEffect(() => {
@@ -242,7 +249,7 @@ export const BuyerMarketplace = () => {
       )}
 
       {/* Database not configured warning */}
-      {!isSupabaseConfigured && (
+      {!supabaseReady && (
         <div className="mb-4 px-4 py-3 bg-orange-500/10 border border-orange-400/30 rounded-xl text-sm text-orange-300">
           <strong>Local mode:</strong> Listings are stored on this machine only. Buyers on other devices cannot see them.
           {' '}Add <code className="bg-white/10 px-1 rounded">VITE_SUPABASE_URL</code> &amp; <code className="bg-white/10 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to your <code className="bg-white/10 px-1 rounded">.env</code> file to enable cross-device sharing.

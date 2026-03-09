@@ -11,7 +11,7 @@
 import { supabase, isSupabaseConfigured, configReady } from './supabase';
 import type { Listing } from '../store/useAppStore';
 
-export { isSupabaseConfigured };
+export { isSupabaseConfigured, configReady };
 
 // ---------- fetch ----------
 
