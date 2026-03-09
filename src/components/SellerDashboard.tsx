@@ -258,9 +258,16 @@ export const SellerDashboard = () => {
                                     Cancel
                                 </button>
                                 <button
-                                    onClick={() => {
-                                        removeListing(confirmUnlistId);
+                                    onClick={async () => {
+                                        const idToRemove = confirmUnlistId!;
                                         setConfirmUnlistId(null);
+                                        // Remove from shared API so buyers stop seeing it immediately.
+                                        try {
+                                            await fetch(`/api/listings/${idToRemove}`, { method: 'DELETE' });
+                                        } catch {
+                                            // Continue with local removal even if API is unavailable.
+                                        }
+                                        removeListing(idToRemove);
                                         setToast({ type: 'success', message: 'Listing removed from marketplace.' });
                                     }}
                                     className="flex-1 bg-red-600 hover:bg-red-500 py-3 rounded-xl text-sm font-bold transition-colors"
@@ -443,9 +450,29 @@ const ListingModal = ({
         }
 
         if (isEdit && listing) {
-            updateListing(listing.id, payload);
-            onActionResult({ type: 'success', message: 'Listing updated successfully.' });
-            onClose();
+            // Push the update to the shared API so all buyers see the latest data.
+            setIsPublishing(true);
+            fetch(`/api/listings/${listing.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            })
+                .then(async (res) => {
+                    if (!res.ok) throw new Error('API update failed');
+                    return res.json();
+                })
+                .then((updated) => {
+                    upsertListing(updated as Listing);
+                })
+                .catch(() => {
+                    // Fallback to local update.
+                    updateListing(listing.id, payload);
+                })
+                .finally(() => {
+                    setIsPublishing(false);
+                    onActionResult({ type: 'success', message: 'Listing updated successfully.' });
+                    onClose();
+                });
         } else {
             // Save to shared API so listings are visible across connected accounts.
             setIsPublishing(true);

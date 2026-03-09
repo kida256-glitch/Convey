@@ -78,6 +78,49 @@ app.post('/api/listings', (req, res) => {
     return res.status(201).json(listing);
 });
 
+app.put('/api/listings/:id', (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: 'Invalid listing id' });
+    }
+
+    const listings = readListings();
+    const idx = listings.findIndex((l) => l.id === id);
+    if (idx < 0) {
+        return res.status(404).json({ error: 'Listing not found' });
+    }
+
+    const body = req.body ?? {};
+    const updated = { ...listings[idx] };
+    if (body.title !== undefined) updated.title = String(body.title).trim();
+    if (body.description !== undefined) updated.description = String(body.description).trim();
+    if (body.price !== undefined) updated.price = Number(body.price);
+    if (body.stock !== undefined) updated.stock = Number(body.stock);
+    if (body.status !== undefined) updated.status = body.status;
+    if (Array.isArray(body.images)) updated.images = body.images.map((v: unknown) => String(v));
+
+    listings[idx] = updated;
+    writeListings(listings);
+    return res.json(updated);
+});
+
+app.delete('/api/listings/:id', (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: 'Invalid listing id' });
+    }
+
+    const listings = readListings();
+    const idx = listings.findIndex((l) => l.id === id);
+    if (idx < 0) {
+        return res.status(404).json({ error: 'Listing not found' });
+    }
+
+    const filtered = listings.filter((l) => l.id !== id);
+    writeListings(filtered);
+    return res.status(204).end();
+});
+
 app.post('/api/listings/:id/decrement', (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) {
