@@ -2,24 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Send, X, Check, AlertCircle, DollarSign, HandshakeIcon, MessageCircle, ShoppingCart, PackageCheck, Loader2 } from 'lucide-react';
 import { useAppStore, Message, Purchase } from '../store/useAppStore';
-import { useMakeOffer, useAcceptOffer, useAllOnChainListings } from '../lib/useConvey';
-import { CONVEY_ADDRESS, CONVEY_ABI } from '../lib/contract';
-import { config, ACTIVE_CHAIN_ID } from '../wagmi';
+import { useAllOnChainListings } from '../lib/useConvey';
+import { useChainId, useSendTransaction, useSwitchChain, useWaitForTransactionReceipt } from 'wagmi';
+import { parseEther } from 'viem';
+import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME } from '../wagmi';
 import { addNotificationRemote, addPurchaseRemote, appendMessageRemote, updateNegotiationRemote, upsertNegotiationRemote } from '../lib/negotiationsApi';
-
-// readContract from @wagmi/core for imperative reads
-async function fetchListingOffers(listingId: number): Promise<readonly bigint[]> {
-  if (!listingId || listingId <= 0 || !CONVEY_ADDRESS) return [];
-  const { readContract } = await import('@wagmi/core');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (readContract as any)(config, {
-    address: CONVEY_ADDRESS,
-    abi: CONVEY_ABI,
-    chainId: ACTIVE_CHAIN_ID,
-    functionName: 'getListingOffers',
-    args: [BigInt(listingId)],
-  });
-}
 
 interface NegotiationChatProps {
   negotiationId: string;
@@ -30,87 +17,66 @@ interface NegotiationChatProps {
 export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: NegotiationChatProps) => {
   const { negotiations, listings: storeListings, addMessage, updateNegotiation, addNotification, purchases, addPurchase, decrementStock } = useAppStore();
   const { listings: onChainListings } = useAllOnChainListings();
+  const chainId = useChainId();
+  const { switchChain } = useSwitchChain();
+  const { sendTransaction, data: payHash, isPending: payPending, error: payError } = useSendTransaction();
+  const { isSuccess: paySuccess } = useWaitForTransactionReceipt({
+    hash: payHash,
+    chainId: ACTIVE_CHAIN_ID,
+    query: { enabled: !!payHash },
+  });
   const negotiation = negotiations.find((n) => n.id === negotiationId);
   // Look up listing from on-chain data first, fall back to store
   const allListings = onChainListings.length > 0 ? onChainListings : storeListings;
   const listing = allListings.find((l) => l.id === negotiation?.listingId || l.onChainId === negotiation?.onChainListingId);
-
-  // On-chain hooks
-  const { offer: makeOfferOnChain, hash: offerTxHash, isPending: offerPending, isSuccess: offerSuccess, error: offerError } = useMakeOffer();
-  const { accept: acceptOfferOnChain, isPending: releasePending, isSuccess: releaseSuccess, error: releaseError } = useAcceptOffer();
+  const onWrongNetwork = currentUserRole === 'buyer' && chainId !== ACTIVE_CHAIN_ID;
 
   const [offerAmount, setOfferAmount] = useState('');
   const [textInput, setTextInput] = useState('');
   const [activeTab, setActiveTab] = useState<'chat' | 'offer'>('offer');
   const [purchaseDone, setPurchaseDone] = useState(false);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
+  const pendingPurchaseRef = useRef<Purchase | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [negotiation?.messages]);
 
-  // ── On-chain: after buyer's makeOffer confirms ────────────────────────────
   useEffect(() => {
-    if (!offerSuccess || !negotiation) return;
+    if (!paySuccess || !payHash || !pendingPurchaseRef.current || !negotiation) return;
 
-    // Finalise Zustand (same optimistic path as the non-contract flow)
-    const purchase: Purchase = {
-      id: `${Date.now()}-purchase`,
-      negotiationId,
-      listingId: negotiation.listingId,
-      buyerAddress: negotiation.buyerAddress,
-      sellerAddress: negotiation.sellerAddress,
-      amount: negotiation.currentOffer,
-      completedAt: Date.now(),
-      txHash: offerTxHash,
-    };
-    addPurchase(purchase);
-    void addPurchaseRemote(purchase);
+    const confirmedPurchase = { ...pendingPurchaseRef.current, completedAt: Date.now(), txHash: payHash };
+    pendingPurchaseRef.current = null;
+
+    addPurchase(confirmedPurchase);
+    void addPurchaseRemote(confirmedPurchase);
+    decrementStock(confirmedPurchase.listingId);
     setPurchaseDone(true);
-    updateNegotiation(negotiationId, { paymentTxHash: offerTxHash ?? undefined });
-    void updateNegotiationRemote(negotiationId, { paymentTxHash: offerTxHash ?? undefined });
+    setPurchaseError(null);
 
-    // Fetch the newly created on-chain offerId so the seller can release it
-    const offerLookupListingId = negotiation.onChainListingId ?? 0;
-    if (CONVEY_ADDRESS && offerLookupListingId > 0) {
-      fetchListingOffers(offerLookupListingId).then((ids) => {
-        if (Array.isArray(ids) && ids.length > 0) {
-          const latestId = Number(ids[ids.length - 1]);
-          updateNegotiation(negotiationId, { onChainOfferId: latestId });
-          void updateNegotiationRemote(negotiationId, { onChainOfferId: latestId });
-        }
-      }).catch(() => {/* ignore read errors */ });
-    }
+    updateNegotiation(negotiationId, { paymentTxHash: payHash });
+    void updateNegotiationRemote(negotiationId, { paymentTxHash: payHash });
 
     const purchaseNotification = {
       id: `${Date.now()}-purchase-notif`,
       negotiationId,
       forRole: 'seller',
-      preview: `Buyer completed purchase of "${listing?.title ?? `Item #${negotiation.listingId}`}" for ${negotiation.currentOffer} AVAX! Funds are in escrow — release them.`,
+      preview: `Buyer completed purchase of "${listing?.title ?? `Item #${negotiation.listingId}`}" for ${negotiation.currentOffer} AVAX! Payment was sent to your wallet.`,
       read: false,
       timestamp: Date.now(),
     } as const;
     addNotification(purchaseNotification);
     void addNotificationRemote(purchaseNotification);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offerSuccess]);
+  }, [paySuccess, payHash]);
 
-  // ── On-chain: after seller's acceptOffer confirms ─────────────────────────
   useEffect(() => {
-    if (!releaseSuccess || !negotiation) return;
-    decrementStock(negotiation.listingId);
-    const releaseNotification = {
-      id: `${Date.now()}-released-notif`,
-      negotiationId,
-      forRole: 'buyer',
-      preview: `Seller released the funds — your purchase of "${listing?.title}" is complete!`,
-      read: false,
-      timestamp: Date.now(),
-    } as const;
-    addNotification(releaseNotification);
-    void addNotificationRemote(releaseNotification);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [releaseSuccess]);
+    if (!payError) return;
+    pendingPurchaseRef.current = null;
+    const msg = (payError as any)?.shortMessage ?? (payError as Error).message;
+    setPurchaseError(msg || 'Transaction failed.');
+  }, [payError]);
 
   if (!negotiation) return null;
 
@@ -145,14 +111,18 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
 
   const handleCompletePurchase = () => {
     if (!negotiation || existingPurchase) return;
+    if (currentUserRole !== 'buyer') return;
 
-    if (CONVEY_ADDRESS) {
-      // On-chain: deposit funds into escrow; Zustand update fires in the offerSuccess effect
-      makeOfferOnChain(negotiation.onChainListingId ?? negotiation.listingId, negotiation.currentOffer);
+    if (onWrongNetwork) {
+      setPurchaseError(`Switch to ${ACTIVE_CHAIN_NAME} before paying.`);
       return;
     }
 
-    // No contract deployed — optimistic local flow (same as before)
+    if (!/^0x[a-fA-F0-9]{40}$/.test(negotiation.sellerAddress)) {
+      setPurchaseError('Seller wallet address is invalid.');
+      return;
+    }
+
     const purchase: Purchase = {
       id: `${Date.now()}-purchase`,
       negotiationId,
@@ -162,26 +132,14 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
       amount: negotiation.currentOffer,
       completedAt: Date.now(),
     };
-    addPurchase(purchase);
-    void addPurchaseRemote(purchase);
-    decrementStock(negotiation.listingId);
-    setPurchaseDone(true);
+    pendingPurchaseRef.current = purchase;
+    setPurchaseError(null);
 
-    const localPurchaseNotification = {
-      id: `${Date.now()}-purchase-notif`,
-      negotiationId,
-      forRole: 'seller',
-      preview: `Buyer completed purchase of "${listing?.title ?? `Item #${negotiation.listingId}`}" for ${negotiation.currentOffer} AVAX! Item is now sold.`,
-      read: false,
-      timestamp: Date.now(),
-    } as const;
-    addNotification(localPurchaseNotification);
-    void addNotificationRemote(localPurchaseNotification);
-  };
-
-  const handleReleasePurchase = () => {
-    if (!negotiation?.onChainOfferId) return;
-    acceptOfferOnChain(negotiation.onChainOfferId);
+    sendTransaction({
+      chainId: ACTIVE_CHAIN_ID,
+      to: negotiation.sellerAddress as `0x${string}`,
+      value: parseEther(String(negotiation.currentOffer)),
+    });
   };
 
   const handleSendOffer = () => {
@@ -423,7 +381,7 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
         {negotiation.status === 'accepted' && (
           <div className="p-4 bg-green-600/20 border-t border-green-500/30">
             <p className="text-green-300 font-bold text-center mb-3">🎉 Deal agreed at {negotiation.currentOffer} AVAX</p>
-            {releaseSuccess || (isTransactionComplete && !negotiation.onChainOfferId) ? (
+            {isTransactionComplete ? (
               /* ── DONE ── */
               <div className="flex flex-col items-center gap-1">
                 <div className="flex items-center gap-2 text-green-400 font-bold">
@@ -443,71 +401,42 @@ export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: Neg
               </div>
             ) : currentUserRole === 'buyer' ? (
               <>
-                {offerPending ? (
+                {payPending ? (
                   /* Buyer: tx in-flight */
                   <div className="flex items-center justify-center gap-2 text-yellow-300 font-semibold text-sm">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Sending {negotiation.currentOffer} AVAX to escrow…
-                  </div>
-                ) : isTransactionComplete && negotiation.onChainOfferId ? (
-                  /* Buyer: paid, waiting for seller to release */
-                  <div className="flex flex-col items-center gap-1">
-                    <div className="flex items-center gap-2 text-blue-400 font-semibold text-sm">
-                      <AlertCircle className="w-4 h-4" /> Funds in escrow — waiting for seller to release…
-                    </div>
-                    {negotiation.paymentTxHash && (
-                      <a
-                        href={`https://testnet.snowtrace.io/tx/${negotiation.paymentTxHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-400 text-xs underline"
-                      >
-                        Payment Tx ↗
-                      </a>
-                    )}
+                    Sending {negotiation.currentOffer} AVAX to seller wallet…
                   </div>
                 ) : (
                   /* Buyer: not yet paid */
-                  <button
-                    onClick={handleCompletePurchase}
-                    className="w-full py-3 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white"
-                  >
-                    <ShoppingCart className="w-4 h-4" /> Complete Purchase &amp; Pay {negotiation.currentOffer} AVAX
-                  </button>
+                  <div className="flex flex-col gap-2">
+                    {onWrongNetwork && (
+                      <button
+                        onClick={() => switchChain({ chainId: ACTIVE_CHAIN_ID })}
+                        className="w-full py-2 rounded-xl font-bold text-xs transition-colors bg-yellow-500 hover:bg-yellow-400 text-black"
+                      >
+                        Switch to {ACTIVE_CHAIN_NAME}
+                      </button>
+                    )}
+                    <button
+                      onClick={handleCompletePurchase}
+                      className="w-full py-3 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white"
+                    >
+                      <ShoppingCart className="w-4 h-4" /> Complete Purchase &amp; Pay {negotiation.currentOffer} AVAX
+                    </button>
+                  </div>
                 )}
-                {offerError && (
-                  <p className="text-red-400 text-xs mt-1 text-center">{(offerError as Error).message.slice(0, 100)}</p>
+                {purchaseError && (
+                  <p className="text-red-400 text-xs mt-1 text-center">{purchaseError.slice(0, 120)}</p>
                 )}
               </>
             ) : (
-              /* Seller side */
-              <>
-                {negotiation.onChainOfferId ? (
-                  /* Contract deployed: seller can release escrow */
-                  releasePending ? (
-                    <div className="flex items-center justify-center gap-2 text-yellow-300 font-semibold text-sm">
-                      <Loader2 className="w-4 h-4 animate-spin" /> Releasing payment…
-                    </div>
-                  ) : (
-                    <button
-                      onClick={handleReleasePurchase}
-                      className="w-full py-3 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white"
-                    >
-                      <PackageCheck className="w-4 h-4" /> Release Payment &amp; Finalise Sale
-                    </button>
-                  )
-                ) : (
-                  <div className="flex flex-col items-center gap-1">
-                    <div className="flex items-center gap-2 text-yellow-400 font-semibold text-sm">
-                      <AlertCircle className="w-4 h-4" /> Waiting for buyer to complete payment…
-                    </div>
-                    <p className="text-gray-500 text-xs">You will be notified once the buyer pays.</p>
-                  </div>
-                )}
-                {releaseError && (
-                  <p className="text-red-400 text-xs mt-1 text-center">{(releaseError as Error).message.slice(0, 100)}</p>
-                )}
-              </>
+              <div className="flex flex-col items-center gap-1">
+                <div className="flex items-center gap-2 text-yellow-400 font-semibold text-sm">
+                  <AlertCircle className="w-4 h-4" /> Waiting for buyer to complete payment…
+                </div>
+                <p className="text-gray-500 text-xs">Funds will transfer directly to your wallet once buyer confirms.</p>
+              </div>
             )}
           </div>
         )}
