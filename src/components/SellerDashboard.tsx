@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, DollarSign, X, MessageSquare, Eye, Pencil, Bell, PackageCheck, ChevronLeft, ChevronRight, Trash2, ImageOff } from 'lucide-react';
+import { Plus, DollarSign, X, MessageSquare, Eye, Pencil, Bell, PackageCheck, ChevronLeft, ChevronRight, Trash2, ImageOff, Loader2 } from 'lucide-react';
 import { Listing, useAppStore } from '../store/useAppStore';
 import { NegotiationChat } from './NegotiationChat';
 import { useAccount } from 'wagmi';
@@ -366,7 +366,8 @@ const ListingModal = ({
     sellerAddress: string;
     onActionResult: (toast: Toast) => void;
 }) => {
-    const { addListing, updateListing } = useAppStore();
+    const { addListing, updateListing, upsertListing } = useAppStore();
+    const [isPublishing, setIsPublishing] = useState(false);
     const [formData, setFormData] = useState<ListingFormData>(() => {
         if (!listing) {
             return EMPTY_FORM;
@@ -446,10 +447,33 @@ const ListingModal = ({
             onActionResult({ type: 'success', message: 'Listing updated successfully.' });
             onClose();
         } else {
-            // Local listing only: no wallet confirmation needed when publishing.
-            addListing(payload);
-            onActionResult({ type: 'success', message: 'Listing published successfully.' });
-            onClose();
+            // Save to shared API so listings are visible across connected accounts.
+            setIsPublishing(true);
+            fetch('/api/listings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            })
+                .then(async (res) => {
+                    if (!res.ok) {
+                        throw new Error('Unable to publish listing to shared store');
+                    }
+                    return res.json();
+                })
+                .then((created) => {
+                    upsertListing(created as Listing);
+                    onActionResult({ type: 'success', message: 'Listing published successfully.' });
+                    onClose();
+                })
+                .catch(() => {
+                    // Fallback keeps app usable if API is unavailable.
+                    addListing(payload);
+                    onActionResult({ type: 'success', message: 'Listing published locally (API unavailable).' });
+                    onClose();
+                })
+                .finally(() => {
+                    setIsPublishing(false);
+                });
         }
     };
 
@@ -599,9 +623,12 @@ const ListingModal = ({
 
                     <button
                         type="submit"
-                        className="w-full bg-avalanche-red hover:bg-red-600 text-white py-4 rounded-xl font-bold mt-4 transition-colors flex items-center justify-center gap-2"
+                        disabled={isPublishing}
+                        className="w-full bg-avalanche-red hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold mt-4 transition-colors flex items-center justify-center gap-2"
                     >
-                        {isEdit ? 'Save Changes' : 'Publish Listing'}
+                        {isPublishing ? (
+                            <><Loader2 className="w-4 h-4 animate-spin" /> Publishing…</>
+                        ) : isEdit ? 'Save Changes' : 'Publish Listing'}
                     </button>
                 </form>
             </motion.div>

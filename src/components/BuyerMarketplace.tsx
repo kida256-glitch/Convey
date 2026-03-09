@@ -12,9 +12,10 @@ export const BuyerMarketplace = () => {
   const [selectedListing, setSelectedListing] = useState<any>(null);
   const [activeNegotiationId, setActiveNegotiationId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'info' | 'notif'; message: string } | null>(null);
+  const [isLoadingListings, setIsLoadingListings] = useState(true);
   const seenNotifIds = useRef<Set<string>>(new Set());
   const pendingPurchaseRef = useRef<{ purchase: Purchase; listingTitle: string } | null>(null);
-  const { negotiations, addNegotiation, listings: storeListings, notifications, markNotificationsRead, purchases, addPurchase, decrementStock, addNotification } = useAppStore();
+  const { negotiations, addNegotiation, listings: storeListings, notifications, markNotificationsRead, purchases, addPurchase, decrementStock, addNotification, setListings, upsertListing } = useAppStore();
   const { address } = useAccount();
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
@@ -42,6 +43,32 @@ export const BuyerMarketplace = () => {
   const buyerNotifs = notifications.filter((n) => n.forRole === 'buyer' && !n.read);
   const unreadByNeg = (negId: string) => buyerNotifs.filter((n) => n.negotiationId === negId).length;
   const totalUnread = buyerNotifs.length;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncListings = async () => {
+      try {
+        const res = await fetch('/api/listings');
+        if (!res.ok) return;
+        const remote = await res.json();
+        if (!cancelled && Array.isArray(remote)) {
+          setListings(remote);
+        }
+      } catch {
+        // Keep local state if API is unavailable.
+      } finally {
+        if (!cancelled) setIsLoadingListings(false);
+      }
+    };
+
+    void syncListings();
+    const id = window.setInterval(syncListings, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [setListings]);
 
   // Watch for new buyer notifications and surface a popup, once per notification
   useEffect(() => {
@@ -76,6 +103,15 @@ export const BuyerMarketplace = () => {
 
     addPurchase({ ...purchase, txHash: payHash });
     decrementStock(purchase.listingId);
+    void fetch(`/api/listings/${purchase.listingId}/decrement`, { method: 'POST' })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const updated = await res.json();
+        upsertListing(updated);
+      })
+      .catch(() => {
+        // Local decrement already applied.
+      });
     addNotification({
       id: `${payHash}-buynow-notif`,
       negotiationId: purchase.negotiationId,
@@ -86,7 +122,7 @@ export const BuyerMarketplace = () => {
     });
     setToast({ type: 'success', message: `Purchase confirmed! Hash: ${payHash.slice(0, 12)}…` });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paySuccess, payHash]);
+  }, [paySuccess, payHash, decrementStock, addPurchase, addNotification, upsertListing]);
 
   useEffect(() => {
     if (!buyError) return;
@@ -306,7 +342,9 @@ export const BuyerMarketplace = () => {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {marketListings.length === 0 ? (
+        {isLoadingListings ? (
+          <p className="col-span-4 text-center text-gray-500 py-12">Loading listings...</p>
+        ) : marketListings.length === 0 ? (
           <p className="col-span-4 text-center text-gray-500 py-12">No active listings yet.</p>
         ) : (
           marketListings.map((listing) => (

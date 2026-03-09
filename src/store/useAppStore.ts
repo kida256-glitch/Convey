@@ -74,6 +74,8 @@ interface AppState {
   addMessage: (negotiationId: string, message: Message) => void;
 
   listings: Listing[];
+  setListings: (listings: Listing[]) => void;
+  upsertListing: (listing: Listing) => void;
   addListing: (listing: Omit<Listing, 'id'>) => void;
   updateListing: (id: number, updates: Partial<Omit<Listing, 'id'>>) => void;
   removeListing: (id: number) => void;
@@ -122,6 +124,16 @@ export const useAppStore = create<AppState>()(
         })),
 
       listings: [],
+      setListings: (listings) => set(() => ({ listings })),
+      upsertListing: (listing) =>
+        set((state) => {
+          const exists = state.listings.some((l) => l.id === listing.id);
+          return {
+            listings: exists
+              ? state.listings.map((l) => (l.id === listing.id ? listing : l))
+              : [...state.listings, listing],
+          };
+        }),
       addListing: (listing) =>
         set((state) => {
           const nextId = state.listings.length
