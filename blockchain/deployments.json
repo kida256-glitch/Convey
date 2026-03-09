@@ -1,0 +1,10 @@
+[
+  {
+    "network": "fuji",
+    "chainId": 43113,
+    "deployer": "0x2a42dC3171F64B562099123E0E1cDCf52e5a655B",
+    "address": "0x4F86E430D94064826c50C6352E686Ef340208cc6",
+    "txHash": "0x9447113e02d75273a22184a2530b197ed84ae48c7ddd7e60aa4bf7c59d9d8cc5",
+    "timestamp": "2026-03-03T14:57:20.132Z"
+  }
+]

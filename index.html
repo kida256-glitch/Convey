@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Convey Marketplace</title>
+    <script>
+      window.global = window;
+      // Prevent libraries from attempting to overwrite window.fetch
+      if (!window.fetch) {
+         // If fetch doesn't exist, we let them polyfill (unlikely in modern browsers)
+      } else {
+         // If it exists, we might want to protect it or ensure global.fetch is set
+         window.global.fetch = window.fetch;
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

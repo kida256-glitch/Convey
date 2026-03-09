@@ -1,0 +1,578 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
+import { Send, X, Check, AlertCircle, DollarSign, HandshakeIcon, MessageCircle, ShoppingCart, PackageCheck, Loader2 } from 'lucide-react';
+import { useAppStore, Message, Purchase } from '../store/useAppStore';
+import { useMakeOffer, useAcceptOffer, useAllOnChainListings } from '../lib/useConvey';
+import { CONVEY_ADDRESS, CONVEY_ABI } from '../lib/contract';
+import { config, ACTIVE_CHAIN_ID } from '../wagmi';
+
+// readContract from @wagmi/core for imperative reads
+async function fetchListingOffers(listingId: number): Promise<readonly bigint[]> {
+  if (!listingId || listingId <= 0 || !CONVEY_ADDRESS) return [];
+  const { readContract } = await import('@wagmi/core');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (readContract as any)(config, {
+    address: CONVEY_ADDRESS,
+    abi: CONVEY_ABI,
+    chainId: ACTIVE_CHAIN_ID,
+    functionName: 'getListingOffers',
+    args: [BigInt(listingId)],
+  });
+}
+
+interface NegotiationChatProps {
+  negotiationId: string;
+  onClose: () => void;
+  currentUserRole: 'buyer' | 'seller';
+}
+
+export const NegotiationChat = ({ negotiationId, onClose, currentUserRole }: NegotiationChatProps) => {
+  const { negotiations, listings: storeListings, addMessage, updateNegotiation, addNotification, purchases, addPurchase, decrementStock } = useAppStore();
+  const { listings: onChainListings } = useAllOnChainListings();
+  const negotiation = negotiations.find((n) => n.id === negotiationId);
+  // Look up listing from on-chain data first, fall back to store
+  const allListings = onChainListings.length > 0 ? onChainListings : storeListings;
+  const listing = allListings.find((l) => l.id === negotiation?.listingId || l.onChainId === negotiation?.onChainListingId);
+
+  // On-chain hooks
+  const { offer: makeOfferOnChain, hash: offerTxHash, isPending: offerPending, isSuccess: offerSuccess, error: offerError } = useMakeOffer();
+  const { accept: acceptOfferOnChain, isPending: releasePending, isSuccess: releaseSuccess, error: releaseError } = useAcceptOffer();
+
+  const [offerAmount, setOfferAmount] = useState('');
+  const [textInput, setTextInput] = useState('');
+  const [activeTab, setActiveTab] = useState<'chat' | 'offer'>('offer');
+  const [purchaseDone, setPurchaseDone] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [negotiation?.messages]);
+
+  // ── On-chain: after buyer's makeOffer confirms ────────────────────────────
+  useEffect(() => {
+    if (!offerSuccess || !negotiation) return;
+
+    // Finalise Zustand (same optimistic path as the non-contract flow)
+    const purchase: Purchase = {
+      id: `${Date.now()}-purchase`,
+      negotiationId,
+      listingId: negotiation.listingId,
+      buyerAddress: negotiation.buyerAddress,
+      sellerAddress: negotiation.sellerAddress,
+      amount: negotiation.currentOffer,
+      completedAt: Date.now(),
+      txHash: offerTxHash,
+    };
+    addPurchase(purchase);
+    setPurchaseDone(true);
+    updateNegotiation(negotiationId, { paymentTxHash: offerTxHash ?? undefined });
+
+    // Fetch the newly created on-chain offerId so the seller can release it
+    const offerLookupListingId = negotiation.onChainListingId ?? 0;
+    if (CONVEY_ADDRESS && offerLookupListingId > 0) {
+      fetchListingOffers(offerLookupListingId).then((ids) => {
+        if (Array.isArray(ids) && ids.length > 0) {
+          const latestId = Number(ids[ids.length - 1]);
+          updateNegotiation(negotiationId, { onChainOfferId: latestId });
+        }
+      }).catch(() => {/* ignore read errors */ });
+    }
+
+    addNotification({
+      id: `${Date.now()}-purchase-notif`,
+      negotiationId,
+      forRole: 'seller',
+      preview: `Buyer completed purchase of "${listing?.title ?? `Item #${negotiation.listingId}`}" for ${negotiation.currentOffer} AVAX! Funds are in escrow — release them.`,
+      read: false,
+      timestamp: Date.now(),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerSuccess]);
+
+  // ── On-chain: after seller's acceptOffer confirms ─────────────────────────
+  useEffect(() => {
+    if (!releaseSuccess || !negotiation) return;
+    decrementStock(negotiation.listingId);
+    addNotification({
+      id: `${Date.now()}-released-notif`,
+      negotiationId,
+      forRole: 'buyer',
+      preview: `Seller released the funds — your purchase of "${listing?.title}" is complete!`,
+      read: false,
+      timestamp: Date.now(),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [releaseSuccess]);
+
+  if (!negotiation) return null;
+
+  // Check if this negotiation already has a completed purchase
+  const existingPurchase = purchases.find((p) => p.negotiationId === negotiationId);
+  const isTransactionComplete = purchaseDone || !!existingPurchase;
+
+  const messages = negotiation.messages;
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+  const isDone = negotiation.status === 'accepted' || negotiation.status === 'rejected';
+
+  // Determine if the current user's offer is "live" (i.e. the last offer/counter was theirs so other party must respond)
+  const lastOfferMsg = [...messages].reverse().find((m) => m.type === 'offer' || m.type === 'counter');
+  const isMyOfferPending = lastOfferMsg?.sender === currentUserRole;
+
+  // The other party's latest offer amount (for the Accept button)
+  const pendingOffer = !isMyOfferPending && lastOfferMsg ? lastOfferMsg.amount : null;
+
+  // Which turn-state label to show
+  const getTurnLabel = () => {
+    if (isDone) return null;
+    if (messages.length === 0) {
+      return currentUserRole === 'buyer'
+        ? 'Make your opening offer to start the negotiation.'
+        : 'Waiting for the buyer to make an opening offer…';
+    }
+    if (isMyOfferPending) {
+      return `Waiting for the ${currentUserRole === 'buyer' ? 'seller' : 'buyer'} to respond…`;
+    }
+    return `Your turn — accept, counter, or send a message.`;
+  };
+
+  const handleCompletePurchase = () => {
+    if (!negotiation || existingPurchase) return;
+
+    if (CONVEY_ADDRESS) {
+      // On-chain: deposit funds into escrow; Zustand update fires in the offerSuccess effect
+      makeOfferOnChain(negotiation.onChainListingId ?? negotiation.listingId, negotiation.currentOffer);
+      return;
+    }
+
+    // No contract deployed — optimistic local flow (same as before)
+    const purchase: Purchase = {
+      id: `${Date.now()}-purchase`,
+      negotiationId,
+      listingId: negotiation.listingId,
+      buyerAddress: negotiation.buyerAddress,
+      sellerAddress: negotiation.sellerAddress,
+      amount: negotiation.currentOffer,
+      completedAt: Date.now(),
+    };
+    addPurchase(purchase);
+    decrementStock(negotiation.listingId);
+    setPurchaseDone(true);
+
+    addNotification({
+      id: `${Date.now()}-purchase-notif`,
+      negotiationId,
+      forRole: 'seller',
+      preview: `Buyer completed purchase of "${listing?.title ?? `Item #${negotiation.listingId}`}" for ${negotiation.currentOffer} AVAX! Item is now sold.`,
+      read: false,
+      timestamp: Date.now(),
+    });
+  };
+
+  const handleReleasePurchase = () => {
+    if (!negotiation?.onChainOfferId) return;
+    acceptOfferOnChain(negotiation.onChainOfferId);
+  };
+
+  const handleSendOffer = () => {
+    const amount = parseFloat(offerAmount);
+    if (!offerAmount || isNaN(amount) || amount <= 0) return;
+
+    const isOpening = messages.length === 0;
+    const type: Message['type'] = currentUserRole === 'seller' ? 'counter' : 'offer';
+
+    const msg: Message = {
+      id: Date.now().toString(),
+      sender: currentUserRole,
+      text: isOpening
+        ? `Opening offer: ${amount} AVAX`
+        : currentUserRole === 'seller'
+          ? `Counter-offer: ${amount} AVAX`
+          : `New offer: ${amount} AVAX`,
+      type,
+      amount,
+      timestamp: Date.now(),
+    };
+
+    addMessage(negotiationId, msg);
+    updateNegotiation(negotiationId, {
+      currentOffer: amount,
+      status: currentUserRole === 'seller' ? 'countered' : 'open',
+    });
+
+    const otherRole: 'buyer' | 'seller' = currentUserRole === 'buyer' ? 'seller' : 'buyer';
+    addNotification({
+      id: `${Date.now()}-offer`,
+      negotiationId,
+      forRole: otherRole,
+      preview: msg.text,
+      read: false,
+      timestamp: Date.now(),
+    });
+
+    setOfferAmount('');
+  };
+
+  const handleSendText = () => {
+    if (!textInput.trim()) return;
+
+    const msg: Message = {
+      id: Date.now().toString(),
+      sender: currentUserRole,
+      text: textInput.trim(),
+      type: 'text',
+      timestamp: Date.now(),
+    };
+
+    addMessage(negotiationId, msg);
+
+    const otherRole: 'buyer' | 'seller' = currentUserRole === 'buyer' ? 'seller' : 'buyer';
+    addNotification({
+      id: `${Date.now()}-text`,
+      negotiationId,
+      forRole: otherRole,
+      preview: msg.text,
+      read: false,
+      timestamp: Date.now(),
+    });
+
+    setTextInput('');
+  };
+
+  const handleAccept = () => {
+    if (pendingOffer == null) return;
+
+    const msg: Message = {
+      id: Date.now().toString(),
+      sender: currentUserRole,
+      text: `Deal accepted at ${pendingOffer} AVAX! 🎉`,
+      type: 'accept',
+      amount: pendingOffer,
+      timestamp: Date.now(),
+    };
+
+    addMessage(negotiationId, msg);
+    updateNegotiation(negotiationId, { status: 'accepted', currentOffer: pendingOffer });
+
+    const otherRole: 'buyer' | 'seller' = currentUserRole === 'buyer' ? 'seller' : 'buyer';
+    addNotification({
+      id: `${Date.now()}-accept`,
+      negotiationId,
+      forRole: otherRole,
+      preview: msg.text,
+      read: false,
+      timestamp: Date.now(),
+    });
+  };
+
+  const handleReject = () => {
+    const msg: Message = {
+      id: Date.now().toString(),
+      sender: currentUserRole,
+      text: `Offer declined.`,
+      type: 'text',
+      timestamp: Date.now(),
+    };
+
+    addMessage(negotiationId, msg);
+    updateNegotiation(negotiationId, { status: 'rejected' });
+
+    const otherRole: 'buyer' | 'seller' = currentUserRole === 'buyer' ? 'seller' : 'buyer';
+    addNotification({
+      id: `${Date.now()}-reject`,
+      negotiationId,
+      forRole: otherRole,
+      preview: 'Offer declined.',
+      read: false,
+      timestamp: Date.now(),
+    });
+  };
+
+  const statusColor =
+    negotiation.status === 'accepted'
+      ? 'text-green-400'
+      : negotiation.status === 'rejected'
+        ? 'text-red-400'
+        : 'text-yellow-400';
+
+  const statusLabel =
+    negotiation.status === 'accepted'
+      ? 'Deal Closed'
+      : negotiation.status === 'rejected'
+        ? 'Negotiation Ended'
+        : negotiation.status === 'countered'
+          ? 'Counter Offered'
+          : 'Negotiating';
+
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="bg-avalanche-dark border border-white/10 w-full max-w-md h-[640px] rounded-3xl flex flex-col overflow-hidden shadow-2xl"
+      >
+        {/* Header */}
+        <div className="p-4 border-b border-white/10 flex justify-between items-center bg-avalanche-dark-light">
+          <div className="min-w-0 pr-2">
+            <h3 className="font-bold text-base truncate">{listing?.title ?? `Listing #${negotiation.listingId}`}</h3>
+            <div className={`text-xs flex items-center gap-1 mt-0.5 ${statusColor}`}>
+              {negotiation.status === 'accepted' ? (
+                <Check className="w-3 h-3 shrink-0" />
+              ) : (
+                <AlertCircle className="w-3 h-3 shrink-0" />
+              )}
+              {statusLabel}
+              {negotiation.currentOffer > 0 && !isDone && (
+                <span className="ml-2 text-gray-400">
+                  · Current: <span className="text-white font-semibold">{negotiation.currentOffer} AVAX</span>
+                </span>
+              )}
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors shrink-0">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Turn Hint */}
+        {getTurnLabel() && (
+          <div className="px-4 py-2 bg-white/5 border-b border-white/5 text-xs text-gray-400 text-center">
+            {getTurnLabel()}
+          </div>
+        )}
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-black/20">
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-600 text-sm">
+              <HandshakeIcon className="w-10 h-10 opacity-30" />
+              <span>No messages yet.</span>
+            </div>
+          )}
+
+          {messages.map((msg) => {
+            const isMe = msg.sender === currentUserRole;
+            return (
+              <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm ${msg.type === 'accept'
+                    ? 'bg-green-600/30 border border-green-500/40 text-green-200 w-full text-center rounded-2xl'
+                    : isMe
+                      ? 'bg-avalanche-red text-white rounded-br-none'
+                      : 'bg-white/10 text-gray-200 rounded-bl-none'
+                    }`}
+                >
+                  {(msg.type === 'offer' || msg.type === 'counter') && (
+                    <div className="flex items-center gap-1 font-bold text-base mb-1">
+                      <DollarSign className="w-4 h-4 shrink-0" />
+                      {msg.amount} AVAX
+                      <span className="text-xs font-normal opacity-70 ml-1">
+                        {msg.type === 'counter' ? '(counter)' : '(offer)'}
+                      </span>
+                    </div>
+                  )}
+                  {msg.type === 'accept' && (
+                    <div className="flex items-center justify-center gap-2 font-bold mb-1">
+                      <Check className="w-4 h-4" /> DEAL ACCEPTED · {msg.amount} AVAX
+                    </div>
+                  )}
+                  <p className={msg.type === 'accept' ? 'text-green-300 text-xs' : ''}>{msg.text}</p>
+                  <span className="text-[10px] opacity-40 block text-right mt-1">
+                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {' · '}
+                    {msg.sender === 'buyer' ? 'Buyer' : 'Seller'}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Deal summary when accepted */}
+        {negotiation.status === 'accepted' && (
+          <div className="p-4 bg-green-600/20 border-t border-green-500/30">
+            <p className="text-green-300 font-bold text-center mb-3">🎉 Deal agreed at {negotiation.currentOffer} AVAX</p>
+            {releaseSuccess || (isTransactionComplete && !negotiation.onChainOfferId) ? (
+              /* ── DONE ── */
+              <div className="flex flex-col items-center gap-1">
+                <div className="flex items-center gap-2 text-green-400 font-bold">
+                  <PackageCheck className="w-5 h-5" /> Transaction Complete!
+                </div>
+                {negotiation.paymentTxHash && (
+                  <a
+                    href={`https://testnet.snowtrace.io/tx/${negotiation.paymentTxHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-400 text-xs underline"
+                  >
+                    View on Snowtrace ↗
+                  </a>
+                )}
+                <p className="text-green-500 text-xs">The listing has been marked as sold.</p>
+              </div>
+            ) : currentUserRole === 'buyer' ? (
+              <>
+                {offerPending ? (
+                  /* Buyer: tx in-flight */
+                  <div className="flex items-center justify-center gap-2 text-yellow-300 font-semibold text-sm">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Sending {negotiation.currentOffer} AVAX to escrow…
+                  </div>
+                ) : isTransactionComplete && negotiation.onChainOfferId ? (
+                  /* Buyer: paid, waiting for seller to release */
+                  <div className="flex flex-col items-center gap-1">
+                    <div className="flex items-center gap-2 text-blue-400 font-semibold text-sm">
+                      <AlertCircle className="w-4 h-4" /> Funds in escrow — waiting for seller to release…
+                    </div>
+                    {negotiation.paymentTxHash && (
+                      <a
+                        href={`https://testnet.snowtrace.io/tx/${negotiation.paymentTxHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 text-xs underline"
+                      >
+                        Payment Tx ↗
+                      </a>
+                    )}
+                  </div>
+                ) : (
+                  /* Buyer: not yet paid */
+                  <button
+                    onClick={handleCompletePurchase}
+                    className="w-full py-3 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white"
+                  >
+                    <ShoppingCart className="w-4 h-4" /> Complete Purchase &amp; Pay {negotiation.currentOffer} AVAX
+                  </button>
+                )}
+                {offerError && (
+                  <p className="text-red-400 text-xs mt-1 text-center">{(offerError as Error).message.slice(0, 100)}</p>
+                )}
+              </>
+            ) : (
+              /* Seller side */
+              <>
+                {negotiation.onChainOfferId ? (
+                  /* Contract deployed: seller can release escrow */
+                  releasePending ? (
+                    <div className="flex items-center justify-center gap-2 text-yellow-300 font-semibold text-sm">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Releasing payment…
+                    </div>
+                  ) : (
+                    <button
+                      onClick={handleReleasePurchase}
+                      className="w-full py-3 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white"
+                    >
+                      <PackageCheck className="w-4 h-4" /> Release Payment &amp; Finalise Sale
+                    </button>
+                  )
+                ) : (
+                  <div className="flex flex-col items-center gap-1">
+                    <div className="flex items-center gap-2 text-yellow-400 font-semibold text-sm">
+                      <AlertCircle className="w-4 h-4" /> Waiting for buyer to complete payment…
+                    </div>
+                    <p className="text-gray-500 text-xs">You will be notified once the buyer pays.</p>
+                  </div>
+                )}
+                {releaseError && (
+                  <p className="text-red-400 text-xs mt-1 text-center">{(releaseError as Error).message.slice(0, 100)}</p>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {negotiation.status === 'rejected' && (
+          <div className="p-4 bg-red-600/10 border-t border-red-500/20 text-center">
+            <p className="text-red-400 font-semibold text-sm">Negotiation closed. You can start a new one.</p>
+          </div>
+        )}
+
+        {/* Action Area — only when negotiation is active */}
+        {!isDone && (
+          <div className="bg-avalanche-dark-light border-t border-white/10">
+            {/* Accept / Reject — only shown when other party's offer is pending */}
+            {pendingOffer != null && (
+              <div className="flex gap-2 px-4 pt-4">
+                <button
+                  onClick={handleAccept}
+                  className="flex-1 bg-green-600 hover:bg-green-500 text-white py-2 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-1"
+                >
+                  <Check className="w-4 h-4" /> Accept {pendingOffer} AVAX
+                </button>
+                <button
+                  onClick={handleReject}
+                  className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 py-2 rounded-xl font-bold text-sm transition-colors"
+                >
+                  Decline
+                </button>
+              </div>
+            )}
+
+            {/* Tabs */}
+            <div className="flex gap-1 px-4 pt-3">
+              <button
+                onClick={() => setActiveTab('offer')}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1 ${activeTab === 'offer' ? 'bg-avalanche-red text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                  }`}
+              >
+                <DollarSign className="w-3 h-3" />
+                {messages.length === 0 && currentUserRole === 'buyer' ? 'Opening Offer' : 'Counter Offer'}
+              </button>
+              <button
+                onClick={() => setActiveTab('chat')}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1 ${activeTab === 'chat' ? 'bg-avalanche-red text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                  }`}
+              >
+                <MessageCircle className="w-3 h-3" /> Message
+              </button>
+            </div>
+
+            <div className="p-4 pt-2">
+              {activeTab === 'offer' ? (
+                /* Offer input — seller always enabled, buyer only if not waiting */
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="0.0001"
+                    step="0.0001"
+                    value={offerAmount}
+                    onChange={(e) => setOfferAmount(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendOffer()}
+                    placeholder="Amount in AVAX…"
+                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-sm focus:border-avalanche-red outline-none"
+                  />
+                  <button
+                    onClick={handleSendOffer}
+                    disabled={!offerAmount || parseFloat(offerAmount) <= 0}
+                    className="bg-avalanche-red hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 rounded-xl flex items-center justify-center transition-colors"
+                  >
+                    <Send className="w-5 h-5" />
+                  </button>
+                </div>
+              ) : (
+                /* Text chat input */
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendText()}
+                    placeholder="Type a message…"
+                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-sm focus:border-avalanche-red outline-none"
+                  />
+                  <button
+                    onClick={handleSendText}
+                    disabled={!textInput.trim()}
+                    className="bg-avalanche-red hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 rounded-xl flex items-center justify-center transition-colors"
+                  >
+                    <Send className="w-5 h-5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </motion.div>
+    </div>
+  );
+};

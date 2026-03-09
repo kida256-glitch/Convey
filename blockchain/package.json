@@ -1,0 +1,27 @@
+{
+    "name": "convey-contracts",
+    "version": "1.0.0",
+    "description": "Smart contracts for Convey Marketplace on Avalanche",
+    "type": "commonjs",
+    "scripts": {
+        "compile": "hardhat compile",
+        "test": "hardhat test",
+        "deploy:fuji": "hardhat run scripts/deploy.ts --network fuji",
+        "deploy:avalanche": "hardhat run scripts/deploy.ts --network avalanche",
+        "verify": "hardhat run scripts/verify.ts --network fuji",
+        "verify:avalanche": "hardhat run scripts/verify.ts --network avalanche",
+        "export-abi": "node scripts/exportAbi.js"
+    },
+    "devDependencies": {
+        "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+        "@nomicfoundation/hardhat-verify": "^2.0.0",
+        "@typechain/hardhat": "^9.0.0",
+        "hardhat": "^2.22.0",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.4.0"
+    },
+    "dependencies": {
+        "@openzeppelin/contracts": "^5.1.0",
+        "dotenv": "^16.4.0"
+    }
+}
