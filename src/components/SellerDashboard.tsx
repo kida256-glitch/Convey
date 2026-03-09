@@ -433,10 +433,10 @@ const ListingModal = ({
             seller: sellerAddress,
         };
 
-        if (!payload.title || !payload.images.length || Number.isNaN(payload.price) || payload.price <= 0 || Number.isNaN(payload.stock) || payload.stock < 1) {
+        if (!payload.title || Number.isNaN(payload.price) || payload.price <= 0 || Number.isNaN(payload.stock) || payload.stock < 1) {
             onActionResult({
                 type: 'error',
-                message: 'Enter a valid title, at least one image, a price, and a stock quantity (≥ 1).',
+                message: 'Enter a valid title, a price (> 0), and a stock quantity (≥ 1).',
             });
             return;
         }
